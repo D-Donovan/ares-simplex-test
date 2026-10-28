@@ -3,9 +3,10 @@
 Reads aprs-optin.csv (callsign,aprs_ssid,precision,agreed_on), asks aprs.fi for just those callsign-SSIDs
 (up to 20 per request, usually ONE request), and writes aprs-positions.json for the simplex-test page to load.
 
-Privacy: exact latitude/longitude never reach the output file. Each position is rounded to the member's chosen
-grid square (6 characters, or 4 if they asked for the coarser one). The file holds no history and is replaced on
-every run. Do not publish it or commit it anywhere.
+Privacy: by default exact latitude/longitude never reach the output file. Each position is rounded to the member's
+chosen grid square (6 characters, or 4 if they asked for the coarser one). ONLY for a member whose precision is
+"exact" in aprs-optin.csv (they explicitly chose it) does the file also hold their exact lat/lon. The file holds no
+history and is replaced on every run. Do not publish it or commit it anywhere.
 
   py aprs_snapshot.py                      # uses aprs-optin.csv next to this script
   py aprs_snapshot.py --max-age-hours 3    # mark positions older than 3 h as stale
@@ -66,7 +67,8 @@ def read_optin(path):
         if not SSID_RE.match(ssid):
             print('Skipping a row with an invalid callsign-SSID:', repr(ssid))
             continue
-        prec = 4 if str(r.get('precision', '6')).strip() == '4' else 6
+        p = str(r.get('precision', '6')).strip().lower()
+        prec = 'exact' if p in ('exact', 'x') else (4 if p == '4' else 6)
         out.append((re.sub(r'-\d+$', '', ssid), ssid, prec))
     return out
 
@@ -106,7 +108,8 @@ def main():
         if not e or 'lat' not in e or 'lng' not in e:
             missing.append(ssid)
             continue
-        g = grid6(float(e['lat']), float(e['lng']))[:prec]       # exact coordinates are dropped here
+        lat, lng = float(e['lat']), float(e['lng'])
+        g = grid6(lat, lng) if prec == 'exact' else grid6(lat, lng)[:prec]
         last, first = float(e.get('lasttime', 0)), float(e.get('time', 0))
         age_min = max(0, int((now - last) / 60))
         if base in entries and entries[base]['age_min'] <= age_min:
@@ -117,6 +120,8 @@ def main():
             'fixed_hours': round(max(0.0, (last - first) / 3600), 1),
             'stale': age_min > a.max_age_hours * 60,
         }
+        if prec == 'exact':                              # only for members who chose exact; the grid above is still included
+            entries[base]['lat'], entries[base]['lon'] = round(lat, 5), round(lng, 5)
     out = {'generated_at': time.strftime('%Y-%m-%d %H:%M:%S'), 'attribution': 'Data courtesy of aprs.fi', 'entries': entries}
     with open(a.out, 'w', encoding='utf-8') as f:
         json.dump(out, f, indent=1)

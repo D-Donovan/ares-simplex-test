@@ -29,7 +29,7 @@ those members as blue rings. Members join or leave by telling net control; see
 Members can separately agree to let net control use their APRS position during a test. `aprs_snapshot.py`
 (in this repo; it contains no keys) reads a **private** `aprs-optin.csv` and your own aprs.fi API key, asks
 aprs.fi for just those callsign-SSIDs (usually one request), and writes `aprs-positions.json` with each position
-**rounded to the member's chosen grid**, never exact coordinates. Load that file in the page. Those positions are
+**rounded to the member's chosen grid** (exact coordinates only for a member who specifically chose "exact"). Load that file in the page. Those positions are
 not published and the page does not keep them. Data courtesy of [aprs.fi](https://aprs.fi/).
 
 ## Notes

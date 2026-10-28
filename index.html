@@ -72,6 +72,7 @@
      <select id="optinPrec" style="flex:1"><option value="6">6-char grid (a few miles)</option><option value="4">4-char grid (about 70 x 100 mi)</option></select></div>
    <div class="row" style="align-items:center;margin-top:4px"><label style="display:flex;gap:6px;align-items:center;margin:0;flex:2"><input type="checkbox" id="aprsChk" style="width:auto"> Member agrees to use their APRS position (kept on this computer only)</label>
      <input type="text" id="aprsSsid" placeholder="APRS call-SSID, e.g. W0ABC-7" style="flex:1;text-transform:uppercase"></div>
+   <div class="row"><select id="aprsPrec"><option value="6">APRS position: 6-char grid (a few miles)</option><option value="4">APRS position: 4-char grid (about 70 x 100 mi)</option><option value="exact">APRS position: exact (net control only, never published)</option></select></div>
    <label>Results per frequency</label>
    <div id="freqRows"></div>
    <div class="row" style="margin-top:6px"><button class="pri" id="saveBtn">Save station</button><button id="clearBtn">Clear form</button></div>
@@ -93,7 +94,7 @@
    <input type="file" id="optinFile" accept=".csv" style="display:none">
   </div>
   <div class="card"><h2>6. APRS positions (opted-in, private)</h2>
-   <div class="small">For members who agree: net control's computer looks up their APRS position (rounded to the grid they chose) and the page shows it, or fills it in when you log them. Positions are <b>never published</b> and are not kept after you close the page. Run <code>aprs_snapshot.py</code>, then load the file it writes.</div>
+   <div class="small">For members who agree: net control's computer looks up their APRS position (rounded to the grid they chose, or exact if they allowed that) and the page shows it, or fills it in when you log them. Positions are <b>never published</b> and are not kept after you close the page. Run <code>aprs_snapshot.py</code>, then load the file it writes.</div>
    <table><thead><tr><th>Call</th><th>APRS</th><th>Grid</th><th>Status</th><th></th></tr></thead><tbody id="aprsBody"></tbody></table>
    <div class="small" id="aprsInfo"></div>
    <div class="row" style="margin-top:6px"><button id="aprsLoadBtn">Load aprs-positions.json</button><button id="aprsExportBtn">Export aprs-optin.csv (private)</button><button id="aprsImportBtn">Import aprs-optin.csv</button></div>
@@ -223,7 +224,7 @@ function resolveLocField() {
 
 // ---------------------------------------------------------------- UI: table
 function plotPos(e) {
-  if (S.opts.round) { const g = gridToLatLon(latLonToGrid(e.lat, e.lon)); if (g) return g; }
+  if (S.opts.round && !e.exact) { const g = gridToLatLon(latLonToGrid(e.lat, e.lon)); if (g) return g; }
   return { lat: e.lat, lon: e.lon };
 }
 function renderTable() {
@@ -273,7 +274,7 @@ function renderMap() {
     const loggedA = new Set(S.entries.map(e => e.call.replace(/-\d+$/, '')));
     Object.keys(APRS).forEach(c => {
       if (loggedA.has(c)) return;
-      const a = APRS[c], g = gridToLatLon(a.grid); if (!g) return;
+      const a = APRS[c], g = (a.lat !== null && a.lat !== undefined) ? { lat: a.lat, lon: a.lon } : gridToLatLon(a.grid); if (!g) return;
       bounds.push([g.lat, g.lon]);
       L.circleMarker([g.lat, g.lon], { radius: 10, color: '#5b2d91', weight: 3, fillColor: a.stale ? '#d9c4ef' : '#b98ee6', fillOpacity: .85, dashArray: a.stale ? '4 3' : null }).addTo(layer)
         .bindTooltip(c + ' APRS ' + ageLabel(a.age_min) + (a.stale ? ' (stale)' : '') + (a.speed_kmh > 3 ? ' moving' : ''), { permanent: true, direction: 'right', offset: [10, 0] });
@@ -317,13 +318,13 @@ function readForm() {
     const h = document.querySelector('[data-id="hear_' + f.id + '"]').value, n = document.querySelector('[data-id="ncs_' + f.id + '"]').value;
     results[f.id] = { hear: h === '' ? null : +h, ncs: n === '' ? null : +n };
   });
-  return { call, name: $('name').value.trim() || S.roster[call] || S.roster[call.replace(/-\d+$/, '')] || '', lat: form.lat, lon: form.lon, equip: $('equip').value, notes: $('notes').value.trim(), results, time: new Date().toISOString() };
+  return { call, name: $('name').value.trim() || S.roster[call] || S.roster[call.replace(/-\d+$/, '')] || '', lat: form.lat, lon: form.lon, equip: $('equip').value, notes: $('notes').value.trim(), results, exact: !!form.exact, time: new Date().toISOString() };
 }
-function clearForm() { $('call').value = ''; $('name').value = ''; $('loc').value = ''; $('notes').value = ''; form.lat = form.lon = null; $('optinChk').checked = false; $('aprsChk').checked = false; $('aprsSsid').value = ''; renderFreqRows(); updateLocInfo(); $('call').focus(); }
+function clearForm() { $('call').value = ''; $('name').value = ''; $('loc').value = ''; $('notes').value = ''; form.lat = form.lon = null; $('optinChk').checked = false; $('aprsChk').checked = false; $('aprsSsid').value = ''; $('aprsPrec').value = '6'; form.exact = false; renderFreqRows(); updateLocInfo(); $('call').focus(); }
 function editEntry(i) {
   const e = S.entries[i];
   $('call').value = e.call; $('name').value = e.name || ''; $('loc').value = latLonToGrid(e.lat, e.lon); form.lat = e.lat; form.lon = e.lon;
-  $('equip').value = e.equip || $('equip').value; $('notes').value = e.notes || ''; renderFreqRows(e.results); $('optinChk').checked = !!S.optin[e.call]; { const ap = S.aprs[e.call.replace(/-\d+$/, '')]; $('aprsChk').checked = !!ap; $('aprsSsid').value = ap ? ap.ssid : ''; } updateLocInfo('loaded'); window.scrollTo(0, 0);
+  $('equip').value = e.equip || $('equip').value; $('notes').value = e.notes || ''; renderFreqRows(e.results); $('optinChk').checked = !!S.optin[e.call]; { const ap = S.aprs[e.call.replace(/-\d+$/, '')]; $('aprsChk').checked = !!ap; $('aprsSsid').value = ap ? ap.ssid : ''; $('aprsPrec').value = ap ? String(ap.prec) : '6'; } updateLocInfo('loaded'); window.scrollTo(0, 0);
 }
 function csvCell(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: type || 'text/plain' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
@@ -394,13 +395,13 @@ function memberFor(call) {
 }
 function aprsCsv(map) {
   const rows = ['callsign,aprs_ssid,precision,agreed_on'];
-  Object.keys(map).sort().forEach(c => rows.push(c + ',' + map[c].ssid + ',' + (map[c].prec === 4 ? 4 : 6) + ',' + (map[c].date || '')));
+  Object.keys(map).sort().forEach(c => rows.push(c + ',' + map[c].ssid + ',' + (map[c].prec === 'exact' ? 'exact' : map[c].prec === 4 ? 4 : 6) + ',' + (map[c].date || '')));
   return rows.join('\n') + '\n';
 }
 function parseAprsCsv(text) {
   const rows = parseCsv(text), out = {}; if (!rows.length) return out;
   const h = rows[0].map(x => x.trim().toLowerCase()), ci = h.indexOf('callsign'), si = h.indexOf('aprs_ssid'), pi = h.indexOf('precision'), di = h.indexOf('agreed_on');
-  rows.slice(1).forEach(r => { const c = (r[ci] || '').trim().toUpperCase(), ssid = (r[si] || '').trim().toUpperCase(); if (c && /^[A-Z0-9]{3,7}(-\d{1,2})?$/.test(ssid)) out[c] = { ssid, prec: (r[pi] || '').trim() === '4' ? 4 : 6, date: (r[di] || '').trim() }; });
+  rows.slice(1).forEach(r => { const c = (r[ci] || '').trim().toUpperCase(), ssid = (r[si] || '').trim().toUpperCase(); if (c && /^[A-Z0-9]{3,7}(-\d{1,2})?$/.test(ssid)) out[c] = { ssid, prec: /^(exact|x)$/i.test((r[pi] || '').trim()) ? 'exact' : ((r[pi] || '').trim() === '4' ? 4 : 6), date: (r[di] || '').trim() }; });
   return out;
 }
 function ageLabel(min) {
@@ -412,7 +413,7 @@ function ageLabel(min) {
 function loadAprsPositions(text) {
   let j; try { j = JSON.parse(text); } catch (e) { alert('That is not a valid aprs-positions.json file.'); return; }
   const out = {};
-  Object.keys(j.entries || {}).forEach(c => { const e = j.entries[c]; if (e && gridToLatLon(e.grid)) out[c.toUpperCase()] = { ssid: e.ssid, grid: e.grid, age_min: +e.age_min || 0, speed_kmh: +e.speed_kmh || 0, fixed_hours: +e.fixed_hours || 0, stale: !!e.stale }; });
+  Object.keys(j.entries || {}).forEach(c => { const e = j.entries[c]; if (e && gridToLatLon(e.grid)) out[c.toUpperCase()] = { ssid: e.ssid, grid: e.grid, age_min: +e.age_min || 0, speed_kmh: +e.speed_kmh || 0, fixed_hours: +e.fixed_hours || 0, stale: !!e.stale, lat: (e.precision === 'exact' && isFinite(e.lat)) ? +e.lat : null, lon: (e.precision === 'exact' && isFinite(e.lon)) ? +e.lon : null }; });
   APRS = out; APRS_META = { generated: j.generated_at || '' }; S.opts.aprsPos = true; save(); refresh(true);
   if (!Object.keys(out).length) alert('That file has no usable positions. Run aprs_snapshot.py again.');
 }
@@ -421,7 +422,7 @@ function renderAprs() {
   $('aprsBody').innerHTML = keys.map(c => {
     const a = APRS[c], g = a ? a.grid : '';
     const st = !APRS_META ? 'not loaded' : !a ? 'no position' : (a.stale ? 'STALE ' : '') + ageLabel(a.age_min) + (a.speed_kmh > 3 ? ', moving' : (a.fixed_hours >= 24 ? ', fixed' : ''));
-    return '<tr><td><b>' + escapeHtml(c) + '</b></td><td>' + escapeHtml(S.aprs[c].ssid) + ' (' + S.aprs[c].prec + '-char)</td><td>' + escapeHtml(g) + '</td><td>' + escapeHtml(st) + '</td><td class="act"><button data-rmaprs="' + escapeHtml(c) + '">x</button></td></tr>';
+    return '<tr><td><b>' + escapeHtml(c) + '</b></td><td>' + escapeHtml(S.aprs[c].ssid) + ' (' + (S.aprs[c].prec === 'exact' ? 'exact' : S.aprs[c].prec + '-char') + ')</td><td>' + escapeHtml(g) + '</td><td>' + escapeHtml(st) + '</td><td class="act"><button data-rmaprs="' + escapeHtml(c) + '">x</button></td></tr>';
   }).join('') || '<tr><td colspan="5" class="small">Nobody has agreed yet.</td></tr>';
   $('aprsInfo').textContent = keys.length + ' member(s) agreed. ' + (APRS_META ? Object.keys(APRS).length + ' position(s) loaded' + (APRS_META.generated ? ' (' + APRS_META.generated + ')' : '') + '.' : 'No positions loaded.');
   $('aprsCredit').textContent = Object.keys(APRS).length ? '(APRS data courtesy of aprs.fi)' : '';
@@ -474,7 +475,7 @@ function wire() {
   $('ncsGeoBtn').onclick = () => navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => setNcs(p.coords.latitude, p.coords.longitude, 'this computer'), () => alert('Location was not available.')) : alert('Location is not supported here.');
   $('addFreq').onclick = () => { const m = $('newFreq').value.trim(); if (!/^\d{2,3}(\.\d{1,4})?$/.test(m)) { alert('Enter a frequency in MHz, e.g. 146.520'); return; } S.freqs.push({ id: 'f' + Date.now(), mhz: m, label: $('newFreqLabel').value.trim() }); $('newFreq').value = ''; $('newFreqLabel').value = ''; save(); refresh(false); };
   $('freqChips').addEventListener('click', ev => { const id = ev.target.dataset.rm; if (id && confirm('Remove this frequency? Results recorded on it stay in the backup but disappear from the list.')) { S.freqs = S.freqs.filter(f => f.id !== id); save(); refresh(false); } });
-  $('loc').addEventListener('input', resolveLocField);
+  $('loc').addEventListener('input', () => { form.exact = false; resolveLocField(); });
   $('loc').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); $('saveBtn').click(); } });
   $('locMapBtn').onclick = () => { pendingMapClick = 'loc'; if (map) $('map').style.cursor = 'crosshair'; else alert('The map is not available.'); };
   $('findBtn').onclick = async () => {
@@ -491,9 +492,9 @@ function wire() {
     const c = $('call').value.trim().toUpperCase(); const e = S.entries.find(x => x.call === c);
     if (e) { editEntry(S.entries.indexOf(e)); return; }
     if (!$('name').value) $('name').value = S.roster[c] || S.roster[c.replace(/-\d+$/, '')] || '';
-    const ap = APRS[c.replace(/-\d+$/, '')]; const m = ap && !ap.stale ? { grid: ap.grid, src: 'aprs', age: ap.age_min } : memberFor(c);
+    const ap = APRS[c.replace(/-\d+$/, '')]; const m = ap && !ap.stale ? { grid: (ap.lat !== null && ap.lat !== undefined) ? ap.lat.toFixed(5) + ',' + ap.lon.toFixed(5) : ap.grid, src: 'aprs', age: ap.age_min, exact: ap.lat !== null && ap.lat !== undefined } : memberFor(c);
     if (m && m.grid && !$('loc').value.trim()) {
-      $('loc').value = m.grid; resolveLocField();
+      $('loc').value = m.grid; resolveLocField(); form.exact = !!m.exact;
       $('locInfo').innerHTML += (m.src === 'aprs' ? ' <span class="small">(APRS position, ' + ageLabel(m.age) + '; confirm with the member)</span>' : m.src === 'optin' ? ' <span class="small">(shared-map entry the member agreed to)</span>' : ' <span class="small">(from the FCC record' + (m.src === 'zip' ? ', centre of the ZIP code' : '') + ' - approximate; confirm with the member)</span>');
     }
   });
@@ -504,7 +505,7 @@ function wire() {
     if ($('optinChk').checked) S.optin[e.call.replace(/-\d+$/, '')] = { grid: gridPrec(e.lat, e.lon, +$('optinPrec').value), date: stamp() };
     if ($('aprsChk').checked) {
       const base = e.call.replace(/-\d+$/, ''), ssid = ($('aprsSsid').value.trim() || e.call).toUpperCase();
-      if (/^[A-Z0-9]{3,7}(-\d{1,2})?$/.test(ssid)) S.aprs[base] = { ssid, prec: +$('optinPrec').value === 4 ? 4 : 6, date: stamp() };
+      if (/^[A-Z0-9]{3,7}(-\d{1,2})?$/.test(ssid)) S.aprs[base] = { ssid, prec: $('aprsPrec').value === 'exact' ? 'exact' : (+$('aprsPrec').value === 4 ? 4 : 6), date: stamp() };
       else alert('The APRS call-SSID looks wrong (example: W0ABC-7). The APRS agreement was not saved.');
     }
     save(); refresh(false); clearForm(); if (map) { fitMap(); }
@@ -569,6 +570,7 @@ function selfTest() {
   const ap2 = parseAprsCsv(ac);
   t('aprs consent csv roundtrip', ap2.W0TMP.ssid === 'W0TMP-7' && ap2.W0TMP.prec === 4 && ap2.K0ABC.prec === 6 && Object.keys(ap2).length === 2);
   t('aprs consent rejects bad ssid', Object.keys(parseAprsCsv('callsign,aprs_ssid,precision,agreed_on\nW0X,NOT A CALL,6,\n')).length === 0);
+  t('aprs consent exact precision', parseAprsCsv('callsign,aprs_ssid,precision,agreed_on\nW0TMP,W0TMP-5,exact,2026-10-27\n').W0TMP.prec === 'exact' && aprsCsv({ W0TMP: { ssid: 'W0TMP-5', prec: 'exact', date: '' } }).indexOf(',exact,') > 0);
   t('age labels', ageLabel(0) === 'just now' && ageLabel(5) === '5 min ago' && ageLabel(180) === '3 h ago' && ageLabel(4320) === '3 days ago');
   $('selftest').style.display = 'block'; $('selftest').textContent = out.join('\n');
   document.title = out.every(x => x.startsWith('PASS')) ? 'SELFTEST ALL PASS' : 'SELFTEST FAILURES';
