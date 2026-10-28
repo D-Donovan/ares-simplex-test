@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>ARES simplex coverage test - logger and map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Segoe UI, Arial, sans-serif; font-size: 14px; color: #222; background: #eef1f4; }
+  header { background: #1f3f66; color: #fff; padding: 8px 14px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; } header span { font-size: 12px; opacity: .85; }
+  .wrap { display: grid; grid-template-columns: 470px 1fr; gap: 10px; padding: 10px; height: calc(100vh - 46px); }
+  .left { overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+  .card { background: #fff; border: 1px solid #cfd6dd; border-radius: 6px; padding: 8px 10px; flex: 0 0 auto; }
+  .card h2 { font-size: 13px; margin: 0 0 6px; color: #1f3f66; text-transform: uppercase; letter-spacing: .4px; }
+  label { display: block; font-size: 12px; color: #567; margin: 5px 0 2px; }
+  input, select, textarea, button { font: inherit; }
+  input[type=text], select, textarea { width: 100%; padding: 5px 7px; border: 1px solid #b9c3cc; border-radius: 4px; background: #fff; }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; }
+  button { padding: 5px 10px; border: 1px solid #5d7f9e; background: #e6edf4; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #d6e2ee; } button.pri { background: #1f3f66; color: #fff; border-color: #1f3f66; } button.warn { border-color: #b27a82; background: #f6e6e8; }
+  .small { font-size: 11.5px; color: #667; } .ok { color: #2d7a46; } .bad { color: #b0303a; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; } th { background: #e4e9ee; text-align: left; padding: 3px 5px; position: sticky; top: 0; }
+  td { padding: 3px 5px; border-bottom: 1px solid #e6eaee; vertical-align: middle; }
+  .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 3px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.35); }
+  .good { background: #2fa34f; } .partial { background: #f0b429; } .none { background: #d0343e; } .untested { background: #b4bcc4; }
+  .freqrow { display: grid; grid-template-columns: 78px 1fr 1fr; gap: 6px; align-items: center; margin: 3px 0; }
+  .chip { display: inline-block; background: #e6edf4; border: 1px solid #b7c6d6; border-radius: 12px; padding: 1px 8px; margin: 2px 3px 2px 0; font-size: 12px; }
+  .chip b { cursor: pointer; margin-left: 5px; color: #b0303a; }
+  #map { width: 100%; height: 100%; border-radius: 6px; border: 1px solid #cfd6dd; min-height: 400px; }
+  .mapcol { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  .maptools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: #fff; border: 1px solid #cfd6dd; border-radius: 6px; padding: 5px 8px; }
+  .maptools label { display: inline; margin: 0 4px 0 0; } .maptools select { width: auto; }
+  .legend span { margin-right: 12px; white-space: nowrap; }
+  tr.sel td { background: #fff7d6; } td.act button { padding: 1px 6px; }
+  #tableCard { max-height: 300px; overflow: auto; }
+  #selftest { white-space: pre; font-family: Consolas, monospace; font-size: 11px; display: none; }
+  .nolib { background: #fbe9e9; border: 1px solid #c0555a; padding: 8px; border-radius: 6px; display: none; }
+  @media print {
+    header, .left > .card:not(#tableCard), .maptools button, .maptools input { display: none !important; }
+    .wrap { display: block; height: auto; } #map { height: 480px; } #tableCard { max-height: none; overflow: visible; }
+    body { background: #fff; }
+  }
+</style></head><body>
+<header><h1>ARES simplex coverage test</h1><span id="hdrinfo"></span>
+<span style="margin-left:auto"><a href="ARES-Simplex-Test-NCS-Guide.pdf" style="color:#cfe0f2">Net control guide (PDF)</a> &nbsp;|&nbsp; Data stays in this browser. Pins can be rounded to a grid square for privacy. Keep exports private.</span></header>
+<div class="wrap">
+ <div class="left">
+  <div class="card"><h2>1. Setup</h2>
+   <div class="row"><div><label>Net control callsign</label><input type="text" id="ncsCall" placeholder="W0TMP"></div>
+     <div><label>Net control location (grid, lat,lon, or click map)</label><input type="text" id="ncsLoc" placeholder="e.g. EN34ra or 44.02,-92.54"></div></div>
+   <div class="small" id="ncsInfo"></div>
+   <div class="row" style="margin-top:4px"><button id="ncsMapBtn">Set NCS by clicking the map</button><button id="ncsGeoBtn">Use this computer's location</button></div>
+   <label>Tactical simplex frequencies tested (MHz)</label>
+   <div class="row"><input type="text" id="newFreq" placeholder="e.g. 146.520"><input type="text" id="newFreqLabel" placeholder="label (optional)"><button id="addFreq" style="flex:0 0 60px">Add</button></div>
+   <div id="freqChips"></div>
+   <div class="small">Edit this list to match the ARES tactical simplex plan. Nothing is pre-filled except 146.520, the national simplex calling frequency.</div>
+   <div class="row" style="margin-top:5px"><button id="rosterBtn">Load roster (net-roster.txt)</button><button id="membersBtn">Load member QTHs (member-qth.csv)</button></div>
+   <div class="row" style="margin-top:5px"><button id="demoBtn">Load demo data (practice)</button></div>
+   <div class="small" id="membersInfo"></div>
+   <input type="file" id="rosterFile" accept=".txt,.csv" style="display:none"><input type="file" id="membersFile" accept=".csv" style="display:none">
+  </div>
+  <div class="card"><h2>2. Log a station</h2>
+   <div class="row"><div><label>Callsign</label><input type="text" id="call" list="rosterList" autocomplete="off" style="text-transform:uppercase"></div>
+     <div><label>Name (optional)</label><input type="text" id="name"></div></div>
+   <datalist id="rosterList"></datalist>
+   <label>QTH (grid square, "lat,lon", or city/address then Find)</label>
+   <div class="row"><input type="text" id="loc" placeholder="EN34ra   |   44.0121,-92.4802   |   Rochester MN"><button id="findBtn" style="flex:0 0 130px">Find address</button><button id="locMapBtn" style="flex:0 0 120px">Click map</button></div>
+   <div class="small" id="locInfo">No location yet.</div>
+   <div class="row"><div><label>Equipment</label><select id="equip"><option>HT, 5 W, rubber duck</option><option>HT with external antenna</option><option>Mobile, 25-50 W</option><option>Base station, 50 W or more</option><option>Portable / go-kit</option><option>Other (see notes)</option></select></div>
+     <div><label>Antenna / notes</label><input type="text" id="notes" placeholder="e.g. roof J-pole, indoors"></div></div>
+   <label>Results per frequency</label>
+   <div id="freqRows"></div>
+   <div class="row" style="margin-top:6px"><button class="pri" id="saveBtn">Save station</button><button id="clearBtn">Clear form</button></div>
+   <div class="small">Saving an existing callsign updates it. "They hear NCS" = what the station reports. "NCS hears them" = what you copy.</div>
+  </div>
+  <div class="card" id="tableCard"><h2>3. Stations logged <span id="count" class="small"></span></h2>
+   <table><thead><tr><th>Call</th><th>Grid</th><th>mi</th><th>Results</th><th></th></tr></thead><tbody id="tbody"></tbody></table>
+  </div>
+  <div class="card"><h2>4. Export</h2>
+   <div class="row"><button id="csvBtn">CSV</button><button id="kmlBtn">KML (Google Earth)</button><button id="jsonBtn">Backup (JSON)</button></div>
+   <div class="row" style="margin-top:6px"><button id="restoreBtn">Restore backup</button><button id="printBtn">Print map + list</button><button class="warn" id="wipeBtn">Clear all data</button></div>
+   <input type="file" id="restoreFile" accept=".json" style="display:none">
+  </div>
+  <pre id="selftest"></pre>
+ </div>
+ <div class="mapcol">
+  <div class="maptools">
+   <label>Show frequency</label><select id="mapFreq"></select>
+   <label><input type="checkbox" id="optRound"> Round pins to 6-char grid</label>
+   <label><input type="checkbox" id="optLines"> Lines to NCS</label>
+   <label><input type="checkbox" id="optRings"> Range rings</label>
+   <label><input type="checkbox" id="optMembers"> Members not yet logged</label>
+   <button id="fitBtn">Fit map</button>
+   <span class="legend"><span><i class="dot good"></i>two-way readable</span><span><i class="dot partial"></i>weak / one-way / partial</span><span><i class="dot none"></i>not heard</span><span><i class="dot untested"></i>not tested</span></span>
+  </div>
+  <div class="nolib" id="nolib">The map library could not be loaded (internet needed the first time). Logging and exports still work; reload this page when online to see the map.</div>
+  <div id="map"></div>
+ </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+// ---------------------------------------------------------------- helpers
+const KEY = 'ares-simplex-test-v1';
+const $ = id => document.getElementById(id);
+const RES = [['', '- not tested'], ['0', 'Not heard'], ['1', 'Weak / marginal'], ['2', 'Readable'], ['3', 'Solid']];
+const COLORS = { good: '#2fa34f', partial: '#f0b429', none: '#d0343e', untested: '#b4bcc4' };
+
+function gridToLatLon(g) {
+  g = (g || '').trim().toUpperCase();
+  if (!/^[A-R]{2}\d{2}([A-X]{2}(\d{2})?)?$/.test(g)) return null;
+  let lon = (g.charCodeAt(0) - 65) * 20 - 180, lat = (g.charCodeAt(1) - 65) * 10 - 90;
+  lon += parseInt(g[2], 10) * 2; lat += parseInt(g[3], 10);
+  let w = 2, h = 1;
+  if (g.length >= 6) { w = 2 / 24; h = 1 / 24; lon += (g.charCodeAt(4) - 65) * w; lat += (g.charCodeAt(5) - 65) * h; }
+  if (g.length === 8) { w = w / 10; h = h / 10; lon += parseInt(g[6], 10) * w; lat += parseInt(g[7], 10) * h; }
+  return { lat: lat + h / 2, lon: lon + w / 2 };
+}
+function latLonToGrid(lat, lon) {
+  lon += 180; lat += 90;
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWX';
+  let s = A[Math.floor(lon / 20)] + A[Math.floor(lat / 10)];
+  lon %= 20; lat %= 10;
+  s += Math.floor(lon / 2) + '' + Math.floor(lat);
+  lon %= 2; lat %= 1;
+  s += A[Math.floor(lon / (2 / 24))].toLowerCase() + A[Math.floor(lat / (1 / 24))].toLowerCase();
+  return s.slice(0, 2).toUpperCase() + s.slice(2);
+}
+function miles(a, b) {
+  const R = 3958.8, r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+function parseLocation(t) {
+  t = (t || '').trim();
+  if (!t) return null;
+  const g = gridToLatLon(t);
+  if (g) return { lat: g.lat, lon: g.lon, how: 'grid ' + t.toUpperCase() };
+  const m = t.match(/^(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)$/);
+  if (m) { const lat = +m[1], lon = +m[2]; if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return { lat, lon, how: 'lat/lon' }; }
+  return null;
+}
+// status of one station on one frequency
+function statusOf(r) {
+  if (!r) return 'untested';
+  const v = [r.hear, r.ncs].filter(x => x !== null && x !== undefined && x !== '');
+  if (!v.length) return 'untested';
+  const n = v.map(Number);
+  if (n.length === 2 && n.every(x => x >= 2)) return 'good';
+  if (n.every(x => x === 0)) return 'none';
+  return 'partial';
+}
+const RANK = { good: 3, partial: 2, none: 1, untested: 0 };
+function bestStatus(e, freqs) { let b = 'untested'; freqs.forEach(f => { const s = statusOf(e.results[f.id]); if (RANK[s] > RANK[b]) b = s; }); return b; }
+
+// ---------------------------------------------------------------- state
+const DEFAULT = () => ({ ncs: { call: '', lat: 44.02117, lon: -92.54167, text: 'default: repeater site (change me)' },
+  freqs: [{ id: 'f1', mhz: '146.520', label: 'National simplex calling' }], entries: [],
+  opts: { round: true, lines: true, rings: true, members: false, mapFreq: 'best' }, roster: {}, members: {} });
+let S = (() => { try { return Object.assign(DEFAULT(), JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { return DEFAULT(); } })();
+function save() { localStorage.setItem(KEY, JSON.stringify(S)); }
+let pendingMapClick = null;      // 'ncs' | 'loc' | null
+let form = { lat: null, lon: null };
+let map = null, layer = null, tile = null;
+
+// ---------------------------------------------------------------- UI: setup
+function renderSetup() {
+  $('ncsCall').value = S.ncs.call || '';
+  $('ncsInfo').textContent = 'NCS at ' + S.ncs.lat.toFixed(4) + ', ' + S.ncs.lon.toFixed(4) + ' (' + latLonToGrid(S.ncs.lat, S.ncs.lon) + ') - ' + (S.ncs.text || '');
+  $('hdrinfo').textContent = (S.ncs.call ? 'NCS ' + S.ncs.call + ' | ' : '') + S.entries.length + ' station(s) | ' + new Date().toLocaleDateString();
+  $('freqChips').innerHTML = S.freqs.map(f => '<span class="chip">' + f.mhz + (f.label ? ' ' + escapeHtml(f.label) : '') + '<b data-rm="' + f.id + '" title="remove">x</b></span>').join('') || '<span class="small bad">Add at least one frequency.</span>';
+  $('mapFreq').innerHTML = '<option value="best">Best result on any frequency</option>' + S.freqs.map(f => '<option value="' + f.id + '">' + f.mhz + '</option>').join('');
+  $('mapFreq').value = S.freqs.some(f => f.id === S.opts.mapFreq) ? S.opts.mapFreq : 'best';
+  $('optRound').checked = !!S.opts.round; $('optLines').checked = !!S.opts.lines; $('optRings').checked = !!S.opts.rings; $('optMembers').checked = !!S.opts.members;
+  const mAll = Object.keys(S.members).length, mc = Object.values(S.members).filter(x => x.grid).length; $('membersInfo').textContent = mAll ? mc + ' of ' + mAll + ' members have an approximate QTH (FCC address of record; confirm with each member).' : 'No member QTHs loaded.';
+  $('rosterList').innerHTML = Object.keys(S.roster).map(c => '<option value="' + c + '">' + escapeHtml(S.roster[c]) + '</option>').join('');
+  renderFreqRows();
+}
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function resSelect(id, val) { return '<select data-id="' + id + '">' + RES.map(r => '<option value="' + r[0] + '"' + (String(val === null || val === undefined ? '' : val) === r[0] ? ' selected' : '') + '>' + r[1] + '</option>').join('') + '</select>'; }
+function renderFreqRows(existing) {
+  existing = existing || {};
+  $('freqRows').innerHTML = '<div class="freqrow small"><b>Freq</b><b>They hear NCS</b><b>NCS hears them</b></div>' + S.freqs.map(f => {
+    const r = existing[f.id] || {};
+    return '<div class="freqrow"><b>' + f.mhz + '</b>' + resSelect('hear_' + f.id, r.hear) + resSelect('ncs_' + f.id, r.ncs) + '</div>';
+  }).join('');
+}
+function locFromForm() { return form.lat === null ? null : { lat: form.lat, lon: form.lon }; }
+function updateLocInfo(how) {
+  if (form.lat === null) { $('locInfo').textContent = 'No location yet.'; $('locInfo').className = 'small'; return; }
+  const d = miles({ lat: S.ncs.lat, lon: S.ncs.lon }, form);
+  $('locInfo').innerHTML = '<span class="ok">OK</span> ' + (how || '') + ' - grid <b>' + latLonToGrid(form.lat, form.lon) + '</b>, ' + d.toFixed(1) + ' mi from NCS';
+}
+function resolveLocField() {
+  const p = parseLocation($('loc').value);
+  if (p) { form.lat = p.lat; form.lon = p.lon; updateLocInfo(p.how); return true; }
+  form.lat = form.lon = null;
+  $('locInfo').innerHTML = $('loc').value.trim() ? '<span class="bad">Not a grid or lat,lon. Use Find address, or click the map.</span>' : 'No location yet.';
+  return false;
+}
+
+// ---------------------------------------------------------------- UI: table
+function plotPos(e) {
+  if (S.opts.round) { const g = gridToLatLon(latLonToGrid(e.lat, e.lon)); if (g) return g; }
+  return { lat: e.lat, lon: e.lon };
+}
+function renderTable() {
+  const ncs = { lat: S.ncs.lat, lon: S.ncs.lon };
+  $('count').textContent = '(' + S.entries.length + ')';
+  $('tbody').innerHTML = S.entries.map((e, i) => {
+    const d = miles(ncs, e);
+    const chips = S.freqs.map(f => '<span title="' + f.mhz + ': ' + statusOf(e.results[f.id]) + '"><i class="dot ' + statusOf(e.results[f.id]) + '"></i>' + f.mhz + '</span>').join(' ');
+    return '<tr data-i="' + i + '"><td><b>' + escapeHtml(e.call) + '</b></td><td>' + latLonToGrid(e.lat, e.lon) + '</td><td>' + d.toFixed(1) + '</td><td>' + chips + '</td><td class="act"><button data-edit="' + i + '">Edit</button> <button data-del="' + i + '">x</button></td></tr>';
+  }).join('');
+}
+
+// ---------------------------------------------------------------- map
+function initMap() {
+  if (typeof L === 'undefined') { $('nolib').style.display = 'block'; $('map').style.display = 'none'; return; }
+  map = L.map('map').setView([S.ncs.lat, S.ncs.lon], 10);
+  const esri = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}';
+  const osm = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  // OpenStreetMap blocks tile requests from file:// pages, so use Esri there.
+  tile = L.tileLayer(location.protocol === 'file:' ? esri : osm, { maxZoom: 18, attribution: location.protocol === 'file:' ? 'Tiles &copy; Esri' : '&copy; OpenStreetMap contributors' }).addTo(map);
+  layer = L.layerGroup().addTo(map);
+  map.on('click', ev => {
+    if (pendingMapClick === 'ncs') { setNcs(ev.latlng.lat, ev.latlng.lng, 'set by map click'); pendingMapClick = null; }
+    else if (pendingMapClick === 'loc') { form.lat = ev.latlng.lat; form.lon = ev.latlng.lng; $('loc').value = latLonToGrid(form.lat, form.lon); updateLocInfo('map click'); pendingMapClick = null; }
+    $('map').style.cursor = '';
+  });
+}
+function renderMap() {
+  if (!map) return;
+  layer.clearLayers();
+  const sel = S.opts.mapFreq;
+  const ncs = { lat: S.ncs.lat, lon: S.ncs.lon };
+  const bounds = [[ncs.lat, ncs.lon]];
+  if (S.opts.rings) [5, 10, 15, 25].forEach(r => L.circle([ncs.lat, ncs.lon], { radius: r * 1609.34, color: '#6a7a8a', weight: 1, dashArray: '4 6', fill: false, interactive: false }).addTo(layer).bindTooltip(r + ' mi', { permanent: false }));
+  S.entries.forEach((e, i) => {
+    const p = plotPos(e);
+    const st = sel === 'best' ? bestStatus(e, S.freqs) : statusOf(e.results[sel]);
+    bounds.push([p.lat, p.lon]);
+    if (S.opts.lines) L.polyline([[ncs.lat, ncs.lon], [p.lat, p.lon]], { color: COLORS[st], weight: 1.5, opacity: .6, dashArray: st === 'none' ? '3 6' : null, interactive: false }).addTo(layer);
+    const rows = S.freqs.map(f => { const r = e.results[f.id] || {}; return '<tr><td>' + f.mhz + '</td><td>' + lbl(r.hear) + '</td><td>' + lbl(r.ncs) + '</td></tr>'; }).join('');
+    const html = '<b>' + escapeHtml(e.call) + '</b> ' + escapeHtml(e.name || '') + '<br>' + latLonToGrid(e.lat, e.lon) + ' - ' + miles(ncs, e).toFixed(1) + ' mi<br>' + escapeHtml(e.equip || '') + (e.notes ? '<br><i>' + escapeHtml(e.notes) + '</i>' : '') +
+      '<table style="margin-top:4px"><tr><th>MHz</th><th>hears NCS</th><th>NCS hears</th></tr>' + rows + '</table>';
+    L.circleMarker([p.lat, p.lon], { radius: 10, color: '#222', weight: 1.5, fillColor: COLORS[st], fillOpacity: .95 }).addTo(layer).bindPopup(html)
+      .bindTooltip(e.call, { permanent: true, direction: 'right', offset: [8, 0], className: 'lbl' });
+  });
+  if (S.opts.members) {
+    const logged = new Set(S.entries.map(e => e.call.replace(/-\d+$/, '')));
+    Object.keys(S.members).forEach(c => {
+      if (logged.has(c) || !S.members[c].grid) return;
+      const g = gridToLatLon(S.members[c].grid); if (!g) return;
+      L.circleMarker([g.lat, g.lon], { radius: 6, color: '#7a8794', weight: 1.5, fillColor: '#fff', fillOpacity: .7 }).addTo(layer)
+        .bindTooltip(c + ' (not yet logged, approx.)', { direction: 'top' });
+    });
+  }
+  L.marker([ncs.lat, ncs.lon], { icon: L.divIcon({ className: '', html: '<div style="background:#1f3f66;color:#fff;border-radius:4px;padding:1px 6px;font-weight:bold;border:2px solid #fff;box-shadow:0 0 3px #000">NCS ' + escapeHtml(S.ncs.call) + '</div>', iconAnchor: [20, 10] }) }).addTo(layer);
+  window._bounds = bounds;
+}
+function lbl(v) { const f = RES.find(r => r[0] === String(v === null || v === undefined ? '' : v)); return f ? f[1].replace('- ', '') : ''; }
+function fitMap() { if (map && window._bounds && window._bounds.length > 1) map.fitBounds(window._bounds, { padding: [40, 40] }); else if (map) map.setView([S.ncs.lat, S.ncs.lon], 10); }
+function refresh(fit) { renderSetup(); renderTable(); renderMap(); if (fit) fitMap(); updateLocInfo(); }
+
+// ---------------------------------------------------------------- actions
+function setNcs(lat, lon, text) { S.ncs.lat = lat; S.ncs.lon = lon; S.ncs.text = text; save(); refresh(false); if (map) map.setView([lat, lon], map.getZoom()); }
+function readForm() {
+  const call = $('call').value.trim().toUpperCase();
+  if (!call) { alert('Enter a callsign.'); return null; }
+  // keep coordinates already found by "Find address" or a map click; otherwise parse the text box
+  if (form.lat === null && !resolveLocField()) { alert('Enter a location the app can understand (grid square, lat,lon, or use Find address / Click map).'); return null; }
+  const results = {};
+  S.freqs.forEach(f => {
+    const h = document.querySelector('[data-id="hear_' + f.id + '"]').value, n = document.querySelector('[data-id="ncs_' + f.id + '"]').value;
+    results[f.id] = { hear: h === '' ? null : +h, ncs: n === '' ? null : +n };
+  });
+  return { call, name: $('name').value.trim() || S.roster[call] || S.roster[call.replace(/-\d+$/, '')] || '', lat: form.lat, lon: form.lon, equip: $('equip').value, notes: $('notes').value.trim(), results, time: new Date().toISOString() };
+}
+function clearForm() { $('call').value = ''; $('name').value = ''; $('loc').value = ''; $('notes').value = ''; form.lat = form.lon = null; renderFreqRows(); updateLocInfo(); $('call').focus(); }
+function editEntry(i) {
+  const e = S.entries[i];
+  $('call').value = e.call; $('name').value = e.name || ''; $('loc').value = latLonToGrid(e.lat, e.lon); form.lat = e.lat; form.lon = e.lon;
+  $('equip').value = e.equip || $('equip').value; $('notes').value = e.notes || ''; renderFreqRows(e.results); updateLocInfo('loaded'); window.scrollTo(0, 0);
+}
+function csvCell(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: type || 'text/plain' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+function exportPos(e) { return plotPos(e); }
+function stamp() { return new Date().toISOString().slice(0, 10); }
+function exportCsv() {
+  const ncs = { lat: S.ncs.lat, lon: S.ncs.lon };
+  const rows = [['callsign', 'name', 'grid', 'lat', 'lon', 'miles_from_ncs', 'equipment', 'notes', 'frequency_mhz', 'they_hear_ncs', 'ncs_hears_them', 'status']];
+  S.entries.forEach(e => { const p = exportPos(e); S.freqs.forEach(f => { const r = e.results[f.id] || {}; rows.push([e.call, e.name, latLonToGrid(e.lat, e.lon), p.lat.toFixed(5), p.lon.toFixed(5), miles(ncs, e).toFixed(1), e.equip, e.notes, f.mhz, lbl(r.hear), lbl(r.ncs), statusOf(r)]); }); });
+  download('simplex-test-' + stamp() + '.csv', rows.map(r => r.map(csvCell).join(',')).join('\n'), 'text/csv');
+}
+function exportKml() {
+  const col = { good: 'ff4fa32f', partial: 'ff29b4f0', none: 'ff3e34d0', untested: 'ffc4bcb4' };
+  let k = '<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>ARES simplex test ' + stamp() + '</name>';
+  Object.keys(col).forEach(s => { k += '<Style id="' + s + '"><IconStyle><color>' + col[s] + '</color><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon></IconStyle></Style>'; });
+  const sel = S.opts.mapFreq;
+  S.entries.forEach(e => {
+    const p = exportPos(e), st = sel === 'best' ? bestStatus(e, S.freqs) : statusOf(e.results[sel]);
+    const desc = S.freqs.map(f => { const r = e.results[f.id] || {}; return f.mhz + ': hears NCS ' + lbl(r.hear) + ' / NCS hears ' + lbl(r.ncs); }).join('\n');
+    k += '<Placemark><name>' + escapeHtml(e.call) + '</name><description><![CDATA[' + (e.name || '') + '\n' + latLonToGrid(e.lat, e.lon) + '\n' + (e.equip || '') + '\n' + desc + ']]></description><styleUrl>#' + st + '</styleUrl><Point><coordinates>' + p.lon.toFixed(5) + ',' + p.lat.toFixed(5) + ',0</coordinates></Point></Placemark>';
+  });
+  k += '</Document></kml>';
+  download('simplex-test-' + stamp() + '.kml', k, 'application/vnd.google-earth.kml+xml');
+}
+function loadDemo() {
+  if (S.entries.length && !confirm('Add demo stations to the current log? (They are fictional practice data.)')) return;
+  // fictional stations placed around the NCS: [call, lat offset, lon offset, they hear NCS, NCS hears them]
+  const demo = [['DEMO1', 0.02, 0.03, 3, 3], ['DEMO2', 0.10, -0.10, 2, 3], ['DEMO3', -0.15, 0.15, 1, 0], ['DEMO4', 0.20, 0.30, 0, 0],
+                ['DEMO5', -0.05, -0.25, 3, 1], ['DEMO6', 0.30, -0.10, 2, 2], ['DEMO7', -0.30, 0.05, null, null]];
+  demo.forEach(d => {
+    const res = {}; S.freqs.forEach(x => { res[x.id] = { hear: d[3], ncs: d[4] }; });
+    S.entries = S.entries.filter(e => e.call !== d[0]);
+    S.entries.push({ call: d[0], name: 'Demo station', lat: S.ncs.lat + d[1], lon: S.ncs.lon + d[2], equip: 'HT, 5 W, rubber duck', notes: 'FICTIONAL practice data', results: res, time: new Date().toISOString() });
+  });
+  save(); refresh(true);
+}
+function parseCsv(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if (c !== '\r') cell += c;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+function parseMembers(text) {
+  const rows = parseCsv(text); if (!rows.length) return {};
+  const h = rows[0].map(x => x.trim().toLowerCase()), ci = h.indexOf('callsign'), ni = h.indexOf('name'), gi = h.indexOf('grid'), si = h.indexOf('grid_source');
+  const out = {};
+  rows.slice(1).forEach(r => { const c = (r[ci] || '').trim().toUpperCase(); if (c) out[c] = { name: (r[ni] || '').trim(), grid: (r[gi] || '').trim(), src: (r[si] || '').trim() }; });
+  return out;
+}
+function loadMembers(text) {
+  const m = parseMembers(text); S.members = m;
+  Object.keys(m).forEach(c => { if (m[c].name && !S.roster[c]) S.roster[c] = m[c].name; });
+  S.opts.members = true; save(); refresh(true);
+  alert('Loaded ' + Object.keys(m).length + ' member(s), ' + Object.values(m).filter(x => x.grid).length + ' with an approximate QTH. These come from FCC address records: confirm each one with the member, and keep the file private.');
+}
+function memberFor(call) { return S.members[call] || S.members[call.replace(/-\d+$/, '')] || null; }
+function parseRoster(text) {
+  const out = {};
+  text.split(/\r?\n/).forEach(line => {
+    line = line.trim();
+    if (!line || line.startsWith('#')) return;
+    const m = line.match(/^([A-Za-z0-9\/]+)\*?(?:-\d+)?[\s,]+(.*)$/) || line.match(/^([A-Za-z0-9\/]+)\*?$/);
+    if (m) out[m[1].toUpperCase()] = (m[2] || '').trim();
+  });
+  return out;
+}
+function loadRoster(text) {
+  const r = parseRoster(text);
+  Object.assign(S.roster, r);
+  save(); refresh(false); alert('Loaded ' + Object.keys(r).length + ' roster callsign(s) for autocomplete.');
+}
+
+// ---------------------------------------------------------------- wire up
+function wire() {
+  $('ncsCall').addEventListener('input', () => { S.ncs.call = $('ncsCall').value.trim().toUpperCase(); save(); $('hdrinfo').textContent = (S.ncs.call ? 'NCS ' + S.ncs.call + ' | ' : '') + S.entries.length + ' station(s)'; });
+  $('ncsLoc').addEventListener('change', () => { const p = parseLocation($('ncsLoc').value); if (p) { setNcs(p.lat, p.lon, p.how); $('ncsLoc').value = ''; } else alert('Use a grid square or "lat,lon".'); });
+  $('ncsMapBtn').onclick = () => { pendingMapClick = 'ncs'; if (map) $('map').style.cursor = 'crosshair'; else alert('The map is not available.'); };
+  $('ncsGeoBtn').onclick = () => navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => setNcs(p.coords.latitude, p.coords.longitude, 'this computer'), () => alert('Location was not available.')) : alert('Location is not supported here.');
+  $('addFreq').onclick = () => { const m = $('newFreq').value.trim(); if (!/^\d{2,3}(\.\d{1,4})?$/.test(m)) { alert('Enter a frequency in MHz, e.g. 146.520'); return; } S.freqs.push({ id: 'f' + Date.now(), mhz: m, label: $('newFreqLabel').value.trim() }); $('newFreq').value = ''; $('newFreqLabel').value = ''; save(); refresh(false); };
+  $('freqChips').addEventListener('click', ev => { const id = ev.target.dataset.rm; if (id && confirm('Remove this frequency? Results recorded on it stay in the backup but disappear from the list.')) { S.freqs = S.freqs.filter(f => f.id !== id); save(); refresh(false); } });
+  $('loc').addEventListener('input', resolveLocField);
+  $('loc').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); $('saveBtn').click(); } });
+  $('locMapBtn').onclick = () => { pendingMapClick = 'loc'; if (map) $('map').style.cursor = 'crosshair'; else alert('The map is not available.'); };
+  $('findBtn').onclick = async () => {
+    const q = $('loc').value.trim(); if (!q) return;
+    $('locInfo').textContent = 'Searching...';
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q));
+      const j = await r.json();
+      if (!j.length) { $('locInfo').innerHTML = '<span class="bad">No match. Try a grid square, or click the map.</span>'; return; }
+      form.lat = +j[0].lat; form.lon = +j[0].lon; updateLocInfo('found: ' + j[0].display_name.slice(0, 60));
+    } catch (e) { $('locInfo').innerHTML = '<span class="bad">Search needs internet. Enter a grid square or click the map.</span>'; }
+  };
+  $('call').addEventListener('change', () => {
+    const c = $('call').value.trim().toUpperCase(); const e = S.entries.find(x => x.call === c);
+    if (e) { editEntry(S.entries.indexOf(e)); return; }
+    if (!$('name').value) $('name').value = S.roster[c] || S.roster[c.replace(/-\d+$/, '')] || '';
+    const m = memberFor(c);
+    if (m && m.grid && !$('loc').value.trim()) {
+      $('loc').value = m.grid; resolveLocField();
+      $('locInfo').innerHTML += ' <span class="small">(from the FCC record' + (m.src === 'zip' ? ', centre of the ZIP code' : '') + ' - approximate; confirm with the member)</span>';
+    }
+  });
+  $('saveBtn').onclick = () => {
+    const e = readForm(); if (!e) return;
+    const i = S.entries.findIndex(x => x.call === e.call);
+    if (i >= 0) { S.entries[i] = Object.assign(S.entries[i], e, { results: Object.assign({}, S.entries[i].results, e.results) }); } else S.entries.push(e);
+    save(); refresh(false); clearForm(); if (map) { fitMap(); }
+  };
+  $('clearBtn').onclick = clearForm;
+  $('tbody').addEventListener('click', ev => {
+    const t = ev.target;
+    if (t.dataset.edit !== undefined) editEntry(+t.dataset.edit);
+    else if (t.dataset.del !== undefined) { const e = S.entries[+t.dataset.del]; if (confirm('Delete ' + e.call + '?')) { S.entries.splice(+t.dataset.del, 1); save(); refresh(false); } }
+    else { const tr = t.closest('tr'); if (tr && map) { const e = S.entries[+tr.dataset.i]; const p = plotPos(e); map.setView([p.lat, p.lon], Math.max(map.getZoom(), 12)); } }
+  });
+  $('mapFreq').onchange = () => { S.opts.mapFreq = $('mapFreq').value; save(); renderMap(); };
+  ['optRound', 'optLines', 'optRings', 'optMembers'].forEach(id => $(id).onchange = () => { S.opts.round = $('optRound').checked; S.opts.lines = $('optLines').checked; S.opts.rings = $('optRings').checked; S.opts.members = $('optMembers').checked; save(); renderTable(); renderMap(); });
+  $('fitBtn').onclick = fitMap;
+  $('csvBtn').onclick = exportCsv; $('kmlBtn').onclick = exportKml; $('printBtn').onclick = () => window.print();
+  $('jsonBtn').onclick = () => download('simplex-test-backup-' + stamp() + '.json', JSON.stringify(S, null, 1), 'application/json');
+  $('restoreBtn').onclick = () => $('restoreFile').click();
+  $('restoreFile').onchange = ev => { const f = ev.target.files[0]; if (!f) return; f.text().then(t => { try { S = Object.assign(DEFAULT(), JSON.parse(t)); save(); refresh(true); } catch (e) { alert('That file is not a valid backup.'); } }); };
+  $('wipeBtn').onclick = () => { if (confirm('Delete ALL logged stations and settings from this browser? Export a backup first.')) { S = DEFAULT(); save(); refresh(true); } };
+  $('rosterBtn').onclick = () => $('rosterFile').click();
+  $('rosterFile').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(loadRoster); };
+  $('demoBtn').onclick = loadDemo;
+  $('membersBtn').onclick = () => $('membersFile').click();
+  $('membersFile').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(loadMembers); };
+}
+
+// ---------------------------------------------------------------- self test (open this page with #selftest)
+function selfTest() {
+  const out = []; const t = (name, ok) => out.push((ok ? 'PASS ' : 'FAIL ') + name);
+  t('latLonToGrid repeater = EN34ra', latLonToGrid(44.02117, -92.54167) === 'EN34ra');
+  const g = gridToLatLon('EN34ra'); t('gridToLatLon EN34ra near 44.0208,-92.5417', Math.abs(g.lat - 44.0208) < 0.001 && Math.abs(g.lon + 92.5417) < 0.001);
+  t('4-char grid', gridToLatLon('EN34') && Math.abs(gridToLatLon('EN34').lat - 44.5) < 1e-6);
+  t('bad grid rejected', gridToLatLon('ZZ99') === null && gridToLatLon('hello') === null);
+  t('parse lat,lon', (p => p && p.lat === 44.1 && p.lon === -92.5)(parseLocation('44.1, -92.5')));
+  t('distance 0.1449 deg lat ~ 10 mi', Math.abs(miles({ lat: 44, lon: -92 }, { lat: 44.1449, lon: -92 }) - 10) < 0.05);
+  t('status good', statusOf({ hear: 3, ncs: 2 }) === 'good');
+  t('status partial (weak)', statusOf({ hear: 1, ncs: 3 }) === 'partial');
+  t('status partial (one way only)', statusOf({ hear: 3, ncs: null }) === 'partial');
+  t('status none', statusOf({ hear: 0, ncs: 0 }) === 'none');
+  t('status untested', statusOf({ hear: null, ncs: null }) === 'untested' && statusOf(undefined) === 'untested');
+  const r = parseRoster('# comment\nAA0CN*   Collin Howe\nW0TMP-7 Test Op\nK0ABC\n');
+  t('roster parse', r.AA0CN === 'Collin Howe' && r.W0TMP === 'Test Op' && r.K0ABC === '' && Object.keys(r).length === 3);
+  const mm = parseMembers('callsign,name,grid,status,grid_source\nW0ABC,"Doe, Jane",EN34ra,VALID,address\nK0XYZ,Sam,,VALID,none\n');
+  t('members csv parse', mm.W0ABC.name === 'Doe, Jane' && mm.W0ABC.grid === 'EN34ra' && mm.W0ABC.src === 'address' && mm.K0XYZ.grid === '');
+  $('selftest').style.display = 'block'; $('selftest').textContent = out.join('\n');
+  document.title = out.every(x => x.startsWith('PASS')) ? 'SELFTEST ALL PASS' : 'SELFTEST FAILURES';
+}
+
+// ---------------------------------------------------------------- start
+wire(); initMap(); refresh(true);
+if (location.hash === '#selftest') selfTest();
+if (location.hash === '#demo' && !S.entries.length) loadDemo();
+</script></body></html>
