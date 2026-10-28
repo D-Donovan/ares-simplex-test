@@ -274,8 +274,9 @@ function renderMap() {
     Object.keys(APRS).forEach(c => {
       if (loggedA.has(c)) return;
       const a = APRS[c], g = gridToLatLon(a.grid); if (!g) return;
-      L.circleMarker([g.lat, g.lon], { radius: 8, color: '#6b3fa0', weight: 2.5, fillColor: a.stale ? '#eee6f6' : '#c9a8ea', fillOpacity: .9, dashArray: a.stale ? '3 3' : null }).addTo(layer)
-        .bindTooltip(c + ' (APRS, ' + ageLabel(a.age_min) + (a.stale ? ', stale' : '') + (a.speed_kmh > 3 ? ', moving' : '') + ')', { direction: 'top' });
+      bounds.push([g.lat, g.lon]);
+      L.circleMarker([g.lat, g.lon], { radius: 10, color: '#5b2d91', weight: 3, fillColor: a.stale ? '#d9c4ef' : '#b98ee6', fillOpacity: .85, dashArray: a.stale ? '4 3' : null }).addTo(layer)
+        .bindTooltip(c + ' APRS ' + ageLabel(a.age_min) + (a.stale ? ' (stale)' : '') + (a.speed_kmh > 3 ? ' moving' : ''), { permanent: true, direction: 'right', offset: [10, 0] });
     });
   }
   if (S.opts.pub) {
@@ -412,7 +413,8 @@ function loadAprsPositions(text) {
   let j; try { j = JSON.parse(text); } catch (e) { alert('That is not a valid aprs-positions.json file.'); return; }
   const out = {};
   Object.keys(j.entries || {}).forEach(c => { const e = j.entries[c]; if (e && gridToLatLon(e.grid)) out[c.toUpperCase()] = { ssid: e.ssid, grid: e.grid, age_min: +e.age_min || 0, speed_kmh: +e.speed_kmh || 0, fixed_hours: +e.fixed_hours || 0, stale: !!e.stale }; });
-  APRS = out; APRS_META = { generated: j.generated_at || '' }; S.opts.aprsPos = true; save(); refresh(false);
+  APRS = out; APRS_META = { generated: j.generated_at || '' }; S.opts.aprsPos = true; save(); refresh(true);
+  if (!Object.keys(out).length) alert('That file has no usable positions. Run aprs_snapshot.py again.');
 }
 function renderAprs() {
   const keys = Object.keys(S.aprs).sort();
