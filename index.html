@@ -42,7 +42,7 @@
   }
 </style></head><body>
 <header><h1>ARES simplex coverage test</h1><span id="hdrinfo"></span>
-<span style="margin-left:auto"><a href="ARES-Simplex-Test-NCS-Guide.pdf" style="color:#cfe0f2">Net control guide (PDF)</a> &nbsp;|&nbsp; Data stays in this browser. Pins can be rounded to a grid square for privacy. Keep exports private.</span></header>
+<span style="margin-left:auto"><a href="ARES-Simplex-Test-NCS-Guide.pdf" style="color:#cfe0f2">Net control guide</a> &nbsp;|&nbsp; <a href="ARES-Shared-Map-Opt-In.pdf" style="color:#cfe0f2">Join the shared map (opt-in sheet)</a> &nbsp;|&nbsp; Data stays in this browser. Pins can be rounded to a grid square for privacy. Keep exports private.</span></header>
 <div class="wrap">
  <div class="left">
   <div class="card"><h2>1. Setup</h2>
@@ -68,6 +68,8 @@
    <div class="small" id="locInfo">No location yet.</div>
    <div class="row"><div><label>Equipment</label><select id="equip"><option>HT, 5 W, rubber duck</option><option>HT with external antenna</option><option>Mobile, 25-50 W</option><option>Base station, 50 W or more</option><option>Portable / go-kit</option><option>Other (see notes)</option></select></div>
      <div><label>Antenna / notes</label><input type="text" id="notes" placeholder="e.g. roof J-pole, indoors"></div></div>
+   <div class="row" style="align-items:center;margin-top:6px"><label style="display:flex;gap:6px;align-items:center;margin:0;flex:2"><input type="checkbox" id="optinChk" style="width:auto"> Member agrees to appear on the shared map (callsign + grid only)</label>
+     <select id="optinPrec" style="flex:1"><option value="6">6-char grid (a few miles)</option><option value="4">4-char grid (about 70 x 100 mi)</option></select></div>
    <label>Results per frequency</label>
    <div id="freqRows"></div>
    <div class="row" style="margin-top:6px"><button class="pri" id="saveBtn">Save station</button><button id="clearBtn">Clear form</button></div>
@@ -81,6 +83,13 @@
    <div class="row" style="margin-top:6px"><button id="restoreBtn">Restore backup</button><button id="printBtn">Print map + list</button><button class="warn" id="wipeBtn">Clear all data</button></div>
    <input type="file" id="restoreFile" accept=".json" style="display:none">
   </div>
+  <div class="card"><h2>5. Shared map: opted-in members</h2>
+   <div class="small">Only members who <b>say yes</b> are added (tick the box when logging them). The list holds callsign, grid square and date only. Export it, then have it published so every member's map shows who opted in.</div>
+   <table><thead><tr><th>Call</th><th>Grid</th><th>Agreed</th><th></th></tr></thead><tbody id="optinBody"></tbody></table>
+   <div class="small" id="optinInfo"></div>
+   <div class="row" style="margin-top:6px"><button id="optinExportBtn">Export members-optin.csv</button><button id="optinImportBtn">Import opt-in CSV</button><button id="pubLoadBtn">Load published list</button></div>
+   <input type="file" id="optinFile" accept=".csv" style="display:none">
+  </div>
   <pre id="selftest"></pre>
  </div>
  <div class="mapcol">
@@ -90,6 +99,7 @@
    <label><input type="checkbox" id="optLines"> Lines to NCS</label>
    <label><input type="checkbox" id="optRings"> Range rings</label>
    <label><input type="checkbox" id="optMembers"> Members not yet logged</label>
+   <label><input type="checkbox" id="optPub"> Opted-in members (shared map)</label>
    <button id="fitBtn">Fit map</button>
    <span class="legend"><span><i class="dot good"></i>two-way readable</span><span><i class="dot partial"></i>weak / one-way / partial</span><span><i class="dot none"></i>not heard</span><span><i class="dot untested"></i>not tested</span></span>
   </div>
@@ -156,7 +166,7 @@ function bestStatus(e, freqs) { let b = 'untested'; freqs.forEach(f => { const s
 // ---------------------------------------------------------------- state
 const DEFAULT = () => ({ ncs: { call: '', lat: 44.02117, lon: -92.54167, text: 'default: repeater site (change me)' },
   freqs: [{ id: 'f1', mhz: '146.520', label: 'National simplex calling' }], entries: [],
-  opts: { round: true, lines: true, rings: true, members: false, mapFreq: 'best' }, roster: {}, members: {} });
+  opts: { round: true, lines: true, rings: true, members: false, pub: true, mapFreq: 'best' }, roster: {}, members: {}, optin: {}, pub: {} });
 let S = (() => { try { return Object.assign(DEFAULT(), JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { return DEFAULT(); } })();
 function save() { localStorage.setItem(KEY, JSON.stringify(S)); }
 let pendingMapClick = null;      // 'ncs' | 'loc' | null
@@ -171,7 +181,7 @@ function renderSetup() {
   $('freqChips').innerHTML = S.freqs.map(f => '<span class="chip">' + f.mhz + (f.label ? ' ' + escapeHtml(f.label) : '') + '<b data-rm="' + f.id + '" title="remove">x</b></span>').join('') || '<span class="small bad">Add at least one frequency.</span>';
   $('mapFreq').innerHTML = '<option value="best">Best result on any frequency</option>' + S.freqs.map(f => '<option value="' + f.id + '">' + f.mhz + '</option>').join('');
   $('mapFreq').value = S.freqs.some(f => f.id === S.opts.mapFreq) ? S.opts.mapFreq : 'best';
-  $('optRound').checked = !!S.opts.round; $('optLines').checked = !!S.opts.lines; $('optRings').checked = !!S.opts.rings; $('optMembers').checked = !!S.opts.members;
+  $('optRound').checked = !!S.opts.round; $('optLines').checked = !!S.opts.lines; $('optRings').checked = !!S.opts.rings; $('optMembers').checked = !!S.opts.members; $('optPub').checked = !!S.opts.pub;
   const mAll = Object.keys(S.members).length, mc = Object.values(S.members).filter(x => x.grid).length; $('membersInfo').textContent = mAll ? mc + ' of ' + mAll + ' members have an approximate QTH (FCC address of record; confirm with each member).' : 'No member QTHs loaded.';
   $('rosterList').innerHTML = Object.keys(S.roster).map(c => '<option value="' + c + '">' + escapeHtml(S.roster[c]) + '</option>').join('');
   renderFreqRows();
@@ -247,10 +257,20 @@ function renderMap() {
     L.circleMarker([p.lat, p.lon], { radius: 10, color: '#222', weight: 1.5, fillColor: COLORS[st], fillOpacity: .95 }).addTo(layer).bindPopup(html)
       .bindTooltip(e.call, { permanent: true, direction: 'right', offset: [8, 0], className: 'lbl' });
   });
+  if (S.opts.pub) {
+    const loggedP = new Set(S.entries.map(e => e.call.replace(/-\d+$/, '')));
+    const allP = Object.assign({}, S.pub, S.optin);
+    Object.keys(allP).forEach(c => {
+      if (loggedP.has(c)) return;
+      const g = gridToLatLon(allP[c].grid); if (!g) return;
+      L.circleMarker([g.lat, g.lon], { radius: 6, color: '#1f5fa8', weight: 2, fillColor: '#cfe3fa', fillOpacity: .85 }).addTo(layer)
+        .bindTooltip(c + ' (shared map, opted in)', { direction: 'top' });
+    });
+  }
   if (S.opts.members) {
     const logged = new Set(S.entries.map(e => e.call.replace(/-\d+$/, '')));
     Object.keys(S.members).forEach(c => {
-      if (logged.has(c) || !S.members[c].grid) return;
+      if (logged.has(c) || S.pub[c] || S.optin[c] || !S.members[c].grid) return;
       const g = gridToLatLon(S.members[c].grid); if (!g) return;
       L.circleMarker([g.lat, g.lon], { radius: 6, color: '#7a8794', weight: 1.5, fillColor: '#fff', fillOpacity: .7 }).addTo(layer)
         .bindTooltip(c + ' (not yet logged, approx.)', { direction: 'top' });
@@ -261,7 +281,7 @@ function renderMap() {
 }
 function lbl(v) { const f = RES.find(r => r[0] === String(v === null || v === undefined ? '' : v)); return f ? f[1].replace('- ', '') : ''; }
 function fitMap() { if (map && window._bounds && window._bounds.length > 1) map.fitBounds(window._bounds, { padding: [40, 40] }); else if (map) map.setView([S.ncs.lat, S.ncs.lon], 10); }
-function refresh(fit) { renderSetup(); renderTable(); renderMap(); if (fit) fitMap(); updateLocInfo(); }
+function refresh(fit) { renderSetup(); renderOptin(); renderTable(); renderMap(); if (fit) fitMap(); updateLocInfo(); }
 
 // ---------------------------------------------------------------- actions
 function setNcs(lat, lon, text) { S.ncs.lat = lat; S.ncs.lon = lon; S.ncs.text = text; save(); refresh(false); if (map) map.setView([lat, lon], map.getZoom()); }
@@ -277,16 +297,16 @@ function readForm() {
   });
   return { call, name: $('name').value.trim() || S.roster[call] || S.roster[call.replace(/-\d+$/, '')] || '', lat: form.lat, lon: form.lon, equip: $('equip').value, notes: $('notes').value.trim(), results, time: new Date().toISOString() };
 }
-function clearForm() { $('call').value = ''; $('name').value = ''; $('loc').value = ''; $('notes').value = ''; form.lat = form.lon = null; renderFreqRows(); updateLocInfo(); $('call').focus(); }
+function clearForm() { $('call').value = ''; $('name').value = ''; $('loc').value = ''; $('notes').value = ''; form.lat = form.lon = null; $('optinChk').checked = false; renderFreqRows(); updateLocInfo(); $('call').focus(); }
 function editEntry(i) {
   const e = S.entries[i];
   $('call').value = e.call; $('name').value = e.name || ''; $('loc').value = latLonToGrid(e.lat, e.lon); form.lat = e.lat; form.lon = e.lon;
-  $('equip').value = e.equip || $('equip').value; $('notes').value = e.notes || ''; renderFreqRows(e.results); updateLocInfo('loaded'); window.scrollTo(0, 0);
+  $('equip').value = e.equip || $('equip').value; $('notes').value = e.notes || ''; renderFreqRows(e.results); $('optinChk').checked = !!S.optin[e.call]; updateLocInfo('loaded'); window.scrollTo(0, 0);
 }
 function csvCell(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: type || 'text/plain' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
 function exportPos(e) { return plotPos(e); }
-function stamp() { return new Date().toISOString().slice(0, 10); }
+function stamp() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 function exportCsv() {
   const ncs = { lat: S.ncs.lat, lon: S.ncs.lon };
   const rows = [['callsign', 'name', 'grid', 'lat', 'lon', 'miles_from_ncs', 'equipment', 'notes', 'frequency_mhz', 'they_hear_ncs', 'ncs_hears_them', 'status']];
@@ -344,7 +364,36 @@ function loadMembers(text) {
   S.opts.members = true; save(); refresh(true);
   alert('Loaded ' + Object.keys(m).length + ' member(s), ' + Object.values(m).filter(x => x.grid).length + ' with an approximate QTH. These come from FCC address records: confirm each one with the member, and keep the file private.');
 }
-function memberFor(call) { return S.members[call] || S.members[call.replace(/-\d+$/, '')] || null; }
+function memberFor(call) {
+  const b = call.replace(/-\d+$/, '');
+  const o = S.optin[call] || S.optin[b] || S.pub[call] || S.pub[b];
+  if (o) return { name: '', grid: o.grid, src: 'optin' };
+  return S.members[call] || S.members[b] || null;
+}
+function gridPrec(lat, lon, n) { const g = latLonToGrid(lat, lon); return n === 4 ? g.slice(0, 4) : g; }
+function optinCsv(map) {
+  const rows = ['callsign,grid,agreed_on'];
+  Object.keys(map).sort().forEach(c => rows.push(c + ',' + map[c].grid + ',' + (map[c].date || '')));
+  return rows.join('\n') + '\n';
+}
+function parseOptinCsv(text) {
+  const rows = parseCsv(text), out = {}; if (!rows.length) return out;
+  const h = rows[0].map(x => x.trim().toLowerCase()), ci = h.indexOf('callsign'), gi = h.indexOf('grid'), di = h.indexOf('agreed_on');
+  rows.slice(1).forEach(r => { const c = (r[ci] || '').trim().toUpperCase(), g = (r[gi] || '').trim(); if (c && gridToLatLon(g)) out[c] = { grid: g, date: (r[di] || '').trim() }; });
+  return out;
+}
+async function loadPublished(quiet) {
+  try {
+    const r = await fetch('members-optin.csv?t=' + Date.now()); if (!r.ok) throw new Error('http ' + r.status);
+    S.pub = parseOptinCsv(await r.text()); save(); refresh(false);
+    if (!quiet) alert('Loaded ' + Object.keys(S.pub).length + ' opted-in member(s) from the published list.');
+  } catch (e) { if (!quiet) alert('Could not load the published list. It needs the hosted page and an internet connection.'); }
+}
+function renderOptin() {
+  const keys = Object.keys(S.optin).sort();
+  $('optinBody').innerHTML = keys.map(c => '<tr><td><b>' + escapeHtml(c) + '</b></td><td>' + escapeHtml(S.optin[c].grid) + '</td><td>' + escapeHtml(S.optin[c].date || '') + '</td><td class="act"><button data-rmoptin="' + escapeHtml(c) + '">x</button></td></tr>').join('') || '<tr><td colspan="4" class="small">None yet.</td></tr>';
+  $('optinInfo').textContent = keys.length + ' waiting to publish; ' + Object.keys(S.pub).length + ' on the published list.';
+}
 function parseRoster(text) {
   const out = {};
   text.split(/\r?\n/).forEach(line => {
@@ -389,13 +438,14 @@ function wire() {
     const m = memberFor(c);
     if (m && m.grid && !$('loc').value.trim()) {
       $('loc').value = m.grid; resolveLocField();
-      $('locInfo').innerHTML += ' <span class="small">(from the FCC record' + (m.src === 'zip' ? ', centre of the ZIP code' : '') + ' - approximate; confirm with the member)</span>';
+      $('locInfo').innerHTML += (m.src === 'optin' ? ' <span class="small">(shared-map entry the member agreed to)</span>' : ' <span class="small">(from the FCC record' + (m.src === 'zip' ? ', centre of the ZIP code' : '') + ' - approximate; confirm with the member)</span>');
     }
   });
   $('saveBtn').onclick = () => {
     const e = readForm(); if (!e) return;
     const i = S.entries.findIndex(x => x.call === e.call);
     if (i >= 0) { S.entries[i] = Object.assign(S.entries[i], e, { results: Object.assign({}, S.entries[i].results, e.results) }); } else S.entries.push(e);
+    if ($('optinChk').checked) S.optin[e.call.replace(/-\d+$/, '')] = { grid: gridPrec(e.lat, e.lon, +$('optinPrec').value), date: stamp() };
     save(); refresh(false); clearForm(); if (map) { fitMap(); }
   };
   $('clearBtn').onclick = clearForm;
@@ -406,7 +456,7 @@ function wire() {
     else { const tr = t.closest('tr'); if (tr && map) { const e = S.entries[+tr.dataset.i]; const p = plotPos(e); map.setView([p.lat, p.lon], Math.max(map.getZoom(), 12)); } }
   });
   $('mapFreq').onchange = () => { S.opts.mapFreq = $('mapFreq').value; save(); renderMap(); };
-  ['optRound', 'optLines', 'optRings', 'optMembers'].forEach(id => $(id).onchange = () => { S.opts.round = $('optRound').checked; S.opts.lines = $('optLines').checked; S.opts.rings = $('optRings').checked; S.opts.members = $('optMembers').checked; save(); renderTable(); renderMap(); });
+  ['optRound', 'optLines', 'optRings', 'optMembers', 'optPub'].forEach(id => $(id).onchange = () => { S.opts.round = $('optRound').checked; S.opts.lines = $('optLines').checked; S.opts.rings = $('optRings').checked; S.opts.members = $('optMembers').checked; S.opts.pub = $('optPub').checked; save(); renderTable(); renderMap(); });
   $('fitBtn').onclick = fitMap;
   $('csvBtn').onclick = exportCsv; $('kmlBtn').onclick = exportKml; $('printBtn').onclick = () => window.print();
   $('jsonBtn').onclick = () => download('simplex-test-backup-' + stamp() + '.json', JSON.stringify(S, null, 1), 'application/json');
@@ -416,6 +466,11 @@ function wire() {
   $('rosterBtn').onclick = () => $('rosterFile').click();
   $('rosterFile').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(loadRoster); };
   $('demoBtn').onclick = loadDemo;
+  $('optinExportBtn').onclick = () => { if (!Object.keys(S.optin).length) { alert('Nobody has opted in yet.'); return; } download('members-optin.csv', optinCsv(S.optin), 'text/csv'); };
+  $('optinImportBtn').onclick = () => $('optinFile').click();
+  $('optinFile').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(t => { Object.assign(S.optin, parseOptinCsv(t)); save(); refresh(false); }); };
+  $('pubLoadBtn').onclick = () => loadPublished(false);
+  $('optinBody').addEventListener('click', ev => { const c = ev.target.dataset.rmoptin; if (c && confirm('Remove ' + c + ' from the opt-in list?')) { delete S.optin[c]; save(); refresh(false); } });
   $('membersBtn').onclick = () => $('membersFile').click();
   $('membersFile').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(loadMembers); };
 }
@@ -438,12 +493,18 @@ function selfTest() {
   t('roster parse', r.AA0CN === 'Collin Howe' && r.W0TMP === 'Test Op' && r.K0ABC === '' && Object.keys(r).length === 3);
   const mm = parseMembers('callsign,name,grid,status,grid_source\nW0ABC,"Doe, Jane",EN34ra,VALID,address\nK0XYZ,Sam,,VALID,none\n');
   t('members csv parse', mm.W0ABC.name === 'Doe, Jane' && mm.W0ABC.grid === 'EN34ra' && mm.W0ABC.src === 'address' && mm.K0XYZ.grid === '');
+  const oc = optinCsv({ W0TMP: { grid: 'EN33sx', date: '2026-10-27' }, K0ABC: { grid: 'EN34', date: '2026-10-28' } });
+  const op = parseOptinCsv(oc);
+  t('opt-in csv roundtrip', oc.split('\n')[0] === 'callsign,grid,agreed_on' && op.W0TMP.grid === 'EN33sx' && op.K0ABC.grid === 'EN34' && Object.keys(op).length === 2);
+  t('opt-in csv ignores bad grid', Object.keys(parseOptinCsv('callsign,grid,agreed_on\nW0ZZZ,notagrid,2026-01-01\n')).length === 0);
+  t('gridPrec 4 and 6', gridPrec(44.02117, -92.54167, 4) === 'EN34' && gridPrec(44.02117, -92.54167, 6) === 'EN34ra');
   $('selftest').style.display = 'block'; $('selftest').textContent = out.join('\n');
   document.title = out.every(x => x.startsWith('PASS')) ? 'SELFTEST ALL PASS' : 'SELFTEST FAILURES';
 }
 
 // ---------------------------------------------------------------- start
 wire(); initMap(); refresh(true);
+if (location.protocol.indexOf('http') === 0) loadPublished(true);
 if (location.hash === '#selftest') selfTest();
 if (location.hash === '#demo' && !S.entries.length) loadDemo();
 </script></body></html>
