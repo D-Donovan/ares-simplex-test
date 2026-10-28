@@ -24,6 +24,14 @@ and log stations as they report. The **Net control guide (PDF)** has a suggested
 those members as blue rings. Members join or leave by telling net control; see
 [the opt-in sheet](ARES-Shared-Map-Opt-In.pdf). The file starts empty.
 
+### Optional: APRS positions (private, local only)
+
+Members can separately agree to let net control use their APRS position during a test. `aprs_snapshot.py`
+(in this repo; it contains no keys) reads a **private** `aprs-optin.csv` and your own aprs.fi API key, asks
+aprs.fi for just those callsign-SSIDs (usually one request), and writes `aprs-positions.json` with each position
+**rounded to the member's chosen grid**, never exact coordinates. Load that file in the page. Those positions are
+not published and the page does not keep them. Data courtesy of [aprs.fi](https://aprs.fi/).
+
 ## Notes
 
 - Needs internet for the map tiles (OpenStreetMap) and for the optional *Find address* lookup

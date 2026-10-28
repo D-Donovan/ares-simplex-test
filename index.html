@@ -70,6 +70,8 @@
      <div><label>Antenna / notes</label><input type="text" id="notes" placeholder="e.g. roof J-pole, indoors"></div></div>
    <div class="row" style="align-items:center;margin-top:6px"><label style="display:flex;gap:6px;align-items:center;margin:0;flex:2"><input type="checkbox" id="optinChk" style="width:auto"> Member agrees to appear on the shared map (callsign + grid only)</label>
      <select id="optinPrec" style="flex:1"><option value="6">6-char grid (a few miles)</option><option value="4">4-char grid (about 70 x 100 mi)</option></select></div>
+   <div class="row" style="align-items:center;margin-top:4px"><label style="display:flex;gap:6px;align-items:center;margin:0;flex:2"><input type="checkbox" id="aprsChk" style="width:auto"> Member agrees to use their APRS position (kept on this computer only)</label>
+     <input type="text" id="aprsSsid" placeholder="APRS call-SSID, e.g. W0ABC-7" style="flex:1;text-transform:uppercase"></div>
    <label>Results per frequency</label>
    <div id="freqRows"></div>
    <div class="row" style="margin-top:6px"><button class="pri" id="saveBtn">Save station</button><button id="clearBtn">Clear form</button></div>
@@ -90,6 +92,14 @@
    <div class="row" style="margin-top:6px"><button id="optinExportBtn">Export members-optin.csv</button><button id="optinImportBtn">Import opt-in CSV</button><button id="pubLoadBtn">Load published list</button></div>
    <input type="file" id="optinFile" accept=".csv" style="display:none">
   </div>
+  <div class="card"><h2>6. APRS positions (opted-in, private)</h2>
+   <div class="small">For members who agree: net control's computer looks up their APRS position (rounded to the grid they chose) and the page shows it, or fills it in when you log them. Positions are <b>never published</b> and are not kept after you close the page. Run <code>aprs_snapshot.py</code>, then load the file it writes.</div>
+   <table><thead><tr><th>Call</th><th>APRS</th><th>Grid</th><th>Status</th><th></th></tr></thead><tbody id="aprsBody"></tbody></table>
+   <div class="small" id="aprsInfo"></div>
+   <div class="row" style="margin-top:6px"><button id="aprsLoadBtn">Load aprs-positions.json</button><button id="aprsExportBtn">Export aprs-optin.csv (private)</button><button id="aprsImportBtn">Import aprs-optin.csv</button></div>
+   <input type="file" id="aprsPosFile" accept=".json" style="display:none"><input type="file" id="aprsOptFile" accept=".csv" style="display:none">
+   <div class="small">Data courtesy of aprs.fi.</div>
+  </div>
   <pre id="selftest"></pre>
  </div>
  <div class="mapcol">
@@ -100,6 +110,7 @@
    <label><input type="checkbox" id="optRings"> Range rings</label>
    <label><input type="checkbox" id="optMembers"> Members not yet logged</label>
    <label><input type="checkbox" id="optPub"> Opted-in members (shared map)</label>
+   <label><input type="checkbox" id="optAprs"> APRS snapshot</label> <span class="small" id="aprsCredit"></span>
    <button id="fitBtn">Fit map</button>
    <span class="legend"><span><i class="dot good"></i>two-way readable</span><span><i class="dot partial"></i>weak / one-way / partial</span><span><i class="dot none"></i>not heard</span><span><i class="dot untested"></i>not tested</span></span>
   </div>
@@ -166,9 +177,10 @@ function bestStatus(e, freqs) { let b = 'untested'; freqs.forEach(f => { const s
 // ---------------------------------------------------------------- state
 const DEFAULT = () => ({ ncs: { call: '', lat: 44.02117, lon: -92.54167, text: 'default: repeater site (change me)' },
   freqs: [{ id: 'f1', mhz: '146.520', label: 'National simplex calling' }], entries: [],
-  opts: { round: true, lines: true, rings: true, members: false, pub: true, mapFreq: 'best' }, roster: {}, members: {}, optin: {}, pub: {} });
+  opts: { round: true, lines: true, rings: true, members: false, pub: true, aprsPos: true, mapFreq: 'best' }, roster: {}, members: {}, optin: {}, pub: {}, aprs: {} });
 let S = (() => { try { return Object.assign(DEFAULT(), JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { return DEFAULT(); } })();
 function save() { localStorage.setItem(KEY, JSON.stringify(S)); }
+let APRS = {}, APRS_META = null;      // APRS snapshot positions live in memory only (never saved)
 let pendingMapClick = null;      // 'ncs' | 'loc' | null
 let form = { lat: null, lon: null };
 let map = null, layer = null, tile = null;
@@ -181,7 +193,7 @@ function renderSetup() {
   $('freqChips').innerHTML = S.freqs.map(f => '<span class="chip">' + f.mhz + (f.label ? ' ' + escapeHtml(f.label) : '') + '<b data-rm="' + f.id + '" title="remove">x</b></span>').join('') || '<span class="small bad">Add at least one frequency.</span>';
   $('mapFreq').innerHTML = '<option value="best">Best result on any frequency</option>' + S.freqs.map(f => '<option value="' + f.id + '">' + f.mhz + '</option>').join('');
   $('mapFreq').value = S.freqs.some(f => f.id === S.opts.mapFreq) ? S.opts.mapFreq : 'best';
-  $('optRound').checked = !!S.opts.round; $('optLines').checked = !!S.opts.lines; $('optRings').checked = !!S.opts.rings; $('optMembers').checked = !!S.opts.members; $('optPub').checked = !!S.opts.pub;
+  $('optRound').checked = !!S.opts.round; $('optLines').checked = !!S.opts.lines; $('optRings').checked = !!S.opts.rings; $('optMembers').checked = !!S.opts.members; $('optPub').checked = !!S.opts.pub; $('optAprs').checked = !!S.opts.aprsPos;
   const mAll = Object.keys(S.members).length, mc = Object.values(S.members).filter(x => x.grid).length; $('membersInfo').textContent = mAll ? mc + ' of ' + mAll + ' members have an approximate QTH (FCC address of record; confirm with each member).' : 'No member QTHs loaded.';
   $('rosterList').innerHTML = Object.keys(S.roster).map(c => '<option value="' + c + '">' + escapeHtml(S.roster[c]) + '</option>').join('');
   renderFreqRows();
@@ -257,6 +269,15 @@ function renderMap() {
     L.circleMarker([p.lat, p.lon], { radius: 10, color: '#222', weight: 1.5, fillColor: COLORS[st], fillOpacity: .95 }).addTo(layer).bindPopup(html)
       .bindTooltip(e.call, { permanent: true, direction: 'right', offset: [8, 0], className: 'lbl' });
   });
+  if (S.opts.aprsPos) {
+    const loggedA = new Set(S.entries.map(e => e.call.replace(/-\d+$/, '')));
+    Object.keys(APRS).forEach(c => {
+      if (loggedA.has(c)) return;
+      const a = APRS[c], g = gridToLatLon(a.grid); if (!g) return;
+      L.circleMarker([g.lat, g.lon], { radius: 8, color: '#6b3fa0', weight: 2.5, fillColor: a.stale ? '#eee6f6' : '#c9a8ea', fillOpacity: .9, dashArray: a.stale ? '3 3' : null }).addTo(layer)
+        .bindTooltip(c + ' (APRS, ' + ageLabel(a.age_min) + (a.stale ? ', stale' : '') + (a.speed_kmh > 3 ? ', moving' : '') + ')', { direction: 'top' });
+    });
+  }
   if (S.opts.pub) {
     const loggedP = new Set(S.entries.map(e => e.call.replace(/-\d+$/, '')));
     const allP = Object.assign({}, S.pub, S.optin);
@@ -281,7 +302,7 @@ function renderMap() {
 }
 function lbl(v) { const f = RES.find(r => r[0] === String(v === null || v === undefined ? '' : v)); return f ? f[1].replace('- ', '') : ''; }
 function fitMap() { if (map && window._bounds && window._bounds.length > 1) map.fitBounds(window._bounds, { padding: [40, 40] }); else if (map) map.setView([S.ncs.lat, S.ncs.lon], 10); }
-function refresh(fit) { renderSetup(); renderOptin(); renderTable(); renderMap(); if (fit) fitMap(); updateLocInfo(); }
+function refresh(fit) { renderSetup(); renderOptin(); renderAprs(); renderTable(); renderMap(); if (fit) fitMap(); updateLocInfo(); }
 
 // ---------------------------------------------------------------- actions
 function setNcs(lat, lon, text) { S.ncs.lat = lat; S.ncs.lon = lon; S.ncs.text = text; save(); refresh(false); if (map) map.setView([lat, lon], map.getZoom()); }
@@ -297,11 +318,11 @@ function readForm() {
   });
   return { call, name: $('name').value.trim() || S.roster[call] || S.roster[call.replace(/-\d+$/, '')] || '', lat: form.lat, lon: form.lon, equip: $('equip').value, notes: $('notes').value.trim(), results, time: new Date().toISOString() };
 }
-function clearForm() { $('call').value = ''; $('name').value = ''; $('loc').value = ''; $('notes').value = ''; form.lat = form.lon = null; $('optinChk').checked = false; renderFreqRows(); updateLocInfo(); $('call').focus(); }
+function clearForm() { $('call').value = ''; $('name').value = ''; $('loc').value = ''; $('notes').value = ''; form.lat = form.lon = null; $('optinChk').checked = false; $('aprsChk').checked = false; $('aprsSsid').value = ''; renderFreqRows(); updateLocInfo(); $('call').focus(); }
 function editEntry(i) {
   const e = S.entries[i];
   $('call').value = e.call; $('name').value = e.name || ''; $('loc').value = latLonToGrid(e.lat, e.lon); form.lat = e.lat; form.lon = e.lon;
-  $('equip').value = e.equip || $('equip').value; $('notes').value = e.notes || ''; renderFreqRows(e.results); $('optinChk').checked = !!S.optin[e.call]; updateLocInfo('loaded'); window.scrollTo(0, 0);
+  $('equip').value = e.equip || $('equip').value; $('notes').value = e.notes || ''; renderFreqRows(e.results); $('optinChk').checked = !!S.optin[e.call]; { const ap = S.aprs[e.call.replace(/-\d+$/, '')]; $('aprsChk').checked = !!ap; $('aprsSsid').value = ap ? ap.ssid : ''; } updateLocInfo('loaded'); window.scrollTo(0, 0);
 }
 function csvCell(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: type || 'text/plain' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
@@ -370,6 +391,39 @@ function memberFor(call) {
   if (o) return { name: '', grid: o.grid, src: 'optin' };
   return S.members[call] || S.members[b] || null;
 }
+function aprsCsv(map) {
+  const rows = ['callsign,aprs_ssid,precision,agreed_on'];
+  Object.keys(map).sort().forEach(c => rows.push(c + ',' + map[c].ssid + ',' + (map[c].prec === 4 ? 4 : 6) + ',' + (map[c].date || '')));
+  return rows.join('\n') + '\n';
+}
+function parseAprsCsv(text) {
+  const rows = parseCsv(text), out = {}; if (!rows.length) return out;
+  const h = rows[0].map(x => x.trim().toLowerCase()), ci = h.indexOf('callsign'), si = h.indexOf('aprs_ssid'), pi = h.indexOf('precision'), di = h.indexOf('agreed_on');
+  rows.slice(1).forEach(r => { const c = (r[ci] || '').trim().toUpperCase(), ssid = (r[si] || '').trim().toUpperCase(); if (c && /^[A-Z0-9]{3,7}(-\d{1,2})?$/.test(ssid)) out[c] = { ssid, prec: (r[pi] || '').trim() === '4' ? 4 : 6, date: (r[di] || '').trim() }; });
+  return out;
+}
+function ageLabel(min) {
+  if (min < 1) return 'just now';
+  if (min < 90) return min + ' min ago';
+  if (min < 2880) return Math.round(min / 60) + ' h ago';
+  return Math.round(min / 1440) + ' days ago';
+}
+function loadAprsPositions(text) {
+  let j; try { j = JSON.parse(text); } catch (e) { alert('That is not a valid aprs-positions.json file.'); return; }
+  const out = {};
+  Object.keys(j.entries || {}).forEach(c => { const e = j.entries[c]; if (e && gridToLatLon(e.grid)) out[c.toUpperCase()] = { ssid: e.ssid, grid: e.grid, age_min: +e.age_min || 0, speed_kmh: +e.speed_kmh || 0, fixed_hours: +e.fixed_hours || 0, stale: !!e.stale }; });
+  APRS = out; APRS_META = { generated: j.generated_at || '' }; S.opts.aprsPos = true; save(); refresh(false);
+}
+function renderAprs() {
+  const keys = Object.keys(S.aprs).sort();
+  $('aprsBody').innerHTML = keys.map(c => {
+    const a = APRS[c], g = a ? a.grid : '';
+    const st = !APRS_META ? 'not loaded' : !a ? 'no position' : (a.stale ? 'STALE ' : '') + ageLabel(a.age_min) + (a.speed_kmh > 3 ? ', moving' : (a.fixed_hours >= 24 ? ', fixed' : ''));
+    return '<tr><td><b>' + escapeHtml(c) + '</b></td><td>' + escapeHtml(S.aprs[c].ssid) + ' (' + S.aprs[c].prec + '-char)</td><td>' + escapeHtml(g) + '</td><td>' + escapeHtml(st) + '</td><td class="act"><button data-rmaprs="' + escapeHtml(c) + '">x</button></td></tr>';
+  }).join('') || '<tr><td colspan="5" class="small">Nobody has agreed yet.</td></tr>';
+  $('aprsInfo').textContent = keys.length + ' member(s) agreed. ' + (APRS_META ? Object.keys(APRS).length + ' position(s) loaded' + (APRS_META.generated ? ' (' + APRS_META.generated + ')' : '') + '.' : 'No positions loaded.');
+  $('aprsCredit').textContent = Object.keys(APRS).length ? '(APRS data courtesy of aprs.fi)' : '';
+}
 function gridPrec(lat, lon, n) { const g = latLonToGrid(lat, lon); return n === 4 ? g.slice(0, 4) : g; }
 function optinCsv(map) {
   const rows = ['callsign,grid,agreed_on'];
@@ -435,10 +489,10 @@ function wire() {
     const c = $('call').value.trim().toUpperCase(); const e = S.entries.find(x => x.call === c);
     if (e) { editEntry(S.entries.indexOf(e)); return; }
     if (!$('name').value) $('name').value = S.roster[c] || S.roster[c.replace(/-\d+$/, '')] || '';
-    const m = memberFor(c);
+    const ap = APRS[c.replace(/-\d+$/, '')]; const m = ap && !ap.stale ? { grid: ap.grid, src: 'aprs', age: ap.age_min } : memberFor(c);
     if (m && m.grid && !$('loc').value.trim()) {
       $('loc').value = m.grid; resolveLocField();
-      $('locInfo').innerHTML += (m.src === 'optin' ? ' <span class="small">(shared-map entry the member agreed to)</span>' : ' <span class="small">(from the FCC record' + (m.src === 'zip' ? ', centre of the ZIP code' : '') + ' - approximate; confirm with the member)</span>');
+      $('locInfo').innerHTML += (m.src === 'aprs' ? ' <span class="small">(APRS position, ' + ageLabel(m.age) + '; confirm with the member)</span>' : m.src === 'optin' ? ' <span class="small">(shared-map entry the member agreed to)</span>' : ' <span class="small">(from the FCC record' + (m.src === 'zip' ? ', centre of the ZIP code' : '') + ' - approximate; confirm with the member)</span>');
     }
   });
   $('saveBtn').onclick = () => {
@@ -446,6 +500,11 @@ function wire() {
     const i = S.entries.findIndex(x => x.call === e.call);
     if (i >= 0) { S.entries[i] = Object.assign(S.entries[i], e, { results: Object.assign({}, S.entries[i].results, e.results) }); } else S.entries.push(e);
     if ($('optinChk').checked) S.optin[e.call.replace(/-\d+$/, '')] = { grid: gridPrec(e.lat, e.lon, +$('optinPrec').value), date: stamp() };
+    if ($('aprsChk').checked) {
+      const base = e.call.replace(/-\d+$/, ''), ssid = ($('aprsSsid').value.trim() || e.call).toUpperCase();
+      if (/^[A-Z0-9]{3,7}(-\d{1,2})?$/.test(ssid)) S.aprs[base] = { ssid, prec: +$('optinPrec').value === 4 ? 4 : 6, date: stamp() };
+      else alert('The APRS call-SSID looks wrong (example: W0ABC-7). The APRS agreement was not saved.');
+    }
     save(); refresh(false); clearForm(); if (map) { fitMap(); }
   };
   $('clearBtn').onclick = clearForm;
@@ -456,13 +515,13 @@ function wire() {
     else { const tr = t.closest('tr'); if (tr && map) { const e = S.entries[+tr.dataset.i]; const p = plotPos(e); map.setView([p.lat, p.lon], Math.max(map.getZoom(), 12)); } }
   });
   $('mapFreq').onchange = () => { S.opts.mapFreq = $('mapFreq').value; save(); renderMap(); };
-  ['optRound', 'optLines', 'optRings', 'optMembers', 'optPub'].forEach(id => $(id).onchange = () => { S.opts.round = $('optRound').checked; S.opts.lines = $('optLines').checked; S.opts.rings = $('optRings').checked; S.opts.members = $('optMembers').checked; S.opts.pub = $('optPub').checked; save(); renderTable(); renderMap(); });
+  ['optRound', 'optLines', 'optRings', 'optMembers', 'optPub', 'optAprs'].forEach(id => $(id).onchange = () => { S.opts.round = $('optRound').checked; S.opts.lines = $('optLines').checked; S.opts.rings = $('optRings').checked; S.opts.members = $('optMembers').checked; S.opts.pub = $('optPub').checked; S.opts.aprsPos = $('optAprs').checked; save(); renderTable(); renderMap(); });
   $('fitBtn').onclick = fitMap;
   $('csvBtn').onclick = exportCsv; $('kmlBtn').onclick = exportKml; $('printBtn').onclick = () => window.print();
   $('jsonBtn').onclick = () => download('simplex-test-backup-' + stamp() + '.json', JSON.stringify(S, null, 1), 'application/json');
   $('restoreBtn').onclick = () => $('restoreFile').click();
   $('restoreFile').onchange = ev => { const f = ev.target.files[0]; if (!f) return; f.text().then(t => { try { S = Object.assign(DEFAULT(), JSON.parse(t)); save(); refresh(true); } catch (e) { alert('That file is not a valid backup.'); } }); };
-  $('wipeBtn').onclick = () => { if (confirm('Delete ALL logged stations and settings from this browser? Export a backup first.')) { S = DEFAULT(); save(); refresh(true); } };
+  $('wipeBtn').onclick = () => { if (confirm('Delete ALL logged stations and settings from this browser? Export a backup first.')) { S = DEFAULT(); APRS = {}; APRS_META = null; save(); refresh(true); } };
   $('rosterBtn').onclick = () => $('rosterFile').click();
   $('rosterFile').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(loadRoster); };
   $('demoBtn').onclick = loadDemo;
@@ -470,6 +529,12 @@ function wire() {
   $('optinImportBtn').onclick = () => $('optinFile').click();
   $('optinFile').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(t => { Object.assign(S.optin, parseOptinCsv(t)); save(); refresh(false); }); };
   $('pubLoadBtn').onclick = () => loadPublished(false);
+  $('aprsLoadBtn').onclick = () => $('aprsPosFile').click();
+  $('aprsPosFile').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(loadAprsPositions); };
+  $('aprsExportBtn').onclick = () => { if (!Object.keys(S.aprs).length) { alert('Nobody has agreed to APRS yet.'); return; } download('aprs-optin.csv', aprsCsv(S.aprs), 'text/csv'); };
+  $('aprsImportBtn').onclick = () => $('aprsOptFile').click();
+  $('aprsOptFile').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(t => { Object.assign(S.aprs, parseAprsCsv(t)); save(); refresh(false); }); };
+  $('aprsBody').addEventListener('click', ev => { const c = ev.target.dataset.rmaprs; if (c && confirm('Stop using ' + c + "'s APRS position?")) { delete S.aprs[c]; delete APRS[c]; save(); refresh(false); } });
   $('optinBody').addEventListener('click', ev => { const c = ev.target.dataset.rmoptin; if (c && confirm('Remove ' + c + ' from the opt-in list?')) { delete S.optin[c]; save(); refresh(false); } });
   $('membersBtn').onclick = () => $('membersFile').click();
   $('membersFile').onchange = ev => { const f = ev.target.files[0]; if (f) f.text().then(loadMembers); };
@@ -498,6 +563,11 @@ function selfTest() {
   t('opt-in csv roundtrip', oc.split('\n')[0] === 'callsign,grid,agreed_on' && op.W0TMP.grid === 'EN33sx' && op.K0ABC.grid === 'EN34' && Object.keys(op).length === 2);
   t('opt-in csv ignores bad grid', Object.keys(parseOptinCsv('callsign,grid,agreed_on\nW0ZZZ,notagrid,2026-01-01\n')).length === 0);
   t('gridPrec 4 and 6', gridPrec(44.02117, -92.54167, 4) === 'EN34' && gridPrec(44.02117, -92.54167, 6) === 'EN34ra');
+  const ac = aprsCsv({ W0TMP: { ssid: 'W0TMP-7', prec: 4, date: '2026-10-27' }, K0ABC: { ssid: 'K0ABC', prec: 6, date: '' } });
+  const ap2 = parseAprsCsv(ac);
+  t('aprs consent csv roundtrip', ap2.W0TMP.ssid === 'W0TMP-7' && ap2.W0TMP.prec === 4 && ap2.K0ABC.prec === 6 && Object.keys(ap2).length === 2);
+  t('aprs consent rejects bad ssid', Object.keys(parseAprsCsv('callsign,aprs_ssid,precision,agreed_on\nW0X,NOT A CALL,6,\n')).length === 0);
+  t('age labels', ageLabel(0) === 'just now' && ageLabel(5) === '5 min ago' && ageLabel(180) === '3 h ago' && ageLabel(4320) === '3 days ago');
   $('selftest').style.display = 'block'; $('selftest').textContent = out.join('\n');
   document.title = out.every(x => x.startsWith('PASS')) ? 'SELFTEST ALL PASS' : 'SELFTEST FAILURES';
 }
